@@ -68,7 +68,7 @@ class SequentialDataset(Dataset):
         self.trainData, self.valData, self.testData = [], {}, {}
         self.n_user, self.m_item = 0, 0
 
-        with open(self.dataset + 'data.txt', 'r') as f:
+        with open(self.dataset + 'Beauty.txt', 'r') as f:
             for line in f:
                 line = line.strip().split(' ')
                 user, items = int(line[0]) - 1, [int(item) for item in line[1:]]
@@ -90,7 +90,7 @@ class SequentialDataset(Dataset):
         self.n_user, self.m_item = self.n_user + 1, self.m_item + 1
 
         self.allPos = {}
-        with open(self.dataset + 'test_sample.txt', 'r') as f:
+        with open(self.dataset + 'Beauty_sample.txt', 'r') as f:
             for line in f:
                 line = line.strip().split(' ')
                 user, items = int(line[0]) - 1, [int(item) for item in line[1:]]

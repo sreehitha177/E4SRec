@@ -16,14 +16,15 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, AU
 
 def train(
     # model/data params
-    base_model: str = "",
-    data_path: str = "",
+    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    data_path: str = "datasets/sequential/Beauty/",
     cache_dir: str = "",
-    checkpoint_dir: str = "",
+    checkpoint_dir: str = "checkpoint_dir/",
     output_dir: str = "",
-    task_type: str = "",
+    task_type: str = "sequential",
     # training hyperparams
-    batch_size: int = 128,
+    # batch_size: int = 128,
+    batch_size = 2,
     micro_batch_size: int = 8,
     num_epochs: int = 1,
     learning_rate: float = 3e-4,
@@ -125,7 +126,8 @@ def train(
         task_type=task_type,
         cache_dir=cache_dir,
         input_dim=64,
-        output_dim=dataset.m_item,
+        # output_dim=dataset.m_item,
+        output_dim=100,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,

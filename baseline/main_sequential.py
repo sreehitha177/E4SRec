@@ -39,7 +39,8 @@ args = parse_args()
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
-args.device = 'cuda:' + str(args.cuda) if int(args.cuda) >= 0 else 'cpu'
+# args.device = 'cuda:' + str(args.cuda) if int(args.cuda) >= 0 else 'cpu'
+args.device = 'cpu'
 torch.autograd.set_detect_anomaly(True)
 
 dataset = SequentialDataset(args)
@@ -132,14 +133,28 @@ for epoch in range(args.epochs):
     torch.cuda.empty_cache()
     if (epoch + 1) % args.eval_freq == 0:
         recall = test()
+        # if recall > best_recall:
+        #     best_recall = recall
+        #     if args.save == 1:
+        #         state = {'model': model.state_dict(), 'optimizer': optimizer.state_dict()}
+        #         torch.save(state, '../datasets/sequential/' + args.dataset + '/' + args.model + '.pth')
+        #         pickle.dump(model.embedding.weight.detach(),
+        #                     open('../datasets/sequential/' + args.dataset + '/' + args.model + '_item_embed.pkl', 'wb'))
+        # torch.cuda.empty_cache()
+
         if recall > best_recall:
             best_recall = recall
             if args.save == 1:
+
                 state = {'model': model.state_dict(), 'optimizer': optimizer.state_dict()}
                 torch.save(state, '../datasets/sequential/' + args.dataset + '/' + args.model + '.pth')
-                pickle.dump(model.embedding.weight.detach(),
-                            open('../datasets/sequential/' + args.dataset + '/' + args.model + '_item_embed.pkl', 'wb'))
-        torch.cuda.empty_cache()
+
+
+                item_embs = model.embedding.weight.detach().cpu().numpy()
+                file_path = '../datasets/sequential/' + args.dataset + '/' + args.model + '_item_embed.pkl'
+                with open(file_path, 'wb') as f:
+                    pickle.dump(item_embs, f)
+                print(f"--- Saved clean embeddings to {file_path} ---")
 
 print(f'Model training finished! Total time is {time.time()-t_total}')
 

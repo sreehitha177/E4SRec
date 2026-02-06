@@ -16,14 +16,15 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, AU
 
 def train(
     # model/data params
-    base_model: str = "", 
-    data_path: str = "",
+    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    data_path: str = "datasets/sequential/Beauty/",
     cache_dir: str = "",
-    output_dir: str = "",
-    task_type: str = "",
+    output_dir: str = "./output",
+    task_type: str = "sequential",
     # training hyperparams
-    batch_size: int = 128,
-    micro_batch_size: int = 8,
+    # batch_size: int = 128,
+    batch_size = 8,
+    micro_batch_size: int = 2,
     num_epochs: int = 1,
     learning_rate: float = 3e-4,
     cutoff_len: int = 4096,
@@ -84,7 +85,8 @@ def train(
 
     prompter = Prompter(prompt_template_name)
 
-    device_map = "auto"
+    # device_map = "auto"
+    device_map = {"":0}
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     ddp = world_size != 1
     if ddp:
@@ -112,7 +114,16 @@ def train(
         data_collator = BipartiteGraphCollator()
     elif task_type == 'sequential':
         dataset = SequentialDataset(data_path, 50)
-        user_embed, item_embed = None, pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
+        # user_embed, item_embed = None, pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
+
+        user_embed = None
+        checkpoint = torch.load(data_path + 'SASRec.pth', map_location='cpu', weights_only=False)
+
+        if 'model' in checkpoint:
+            item_embed = checkpoint['model']['embedding.weight']
+        else:
+            item_embed = checkpoint['embedding.weight']
+
         data_collator = SequentialCollator()
 
     model = LLM4Rec(
@@ -120,7 +131,8 @@ def train(
         task_type=task_type,
         cache_dir=cache_dir,
         input_dim=64,
-        output_dim=dataset.m_item,
+        # output_dim=dataset.m_item,
+        output_dim=100,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
@@ -136,6 +148,8 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
+    # Add this line temporarily to see all attributes
+    dataset.trainData = dataset.trainData[:1000]
     trainer = transformers.Trainer(
         model=model,
         train_dataset=dataset,
@@ -147,10 +161,10 @@ def train(
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             # dataloader_num_workers=16,
-            fp16=True,
+            fp16=False,
             logging_steps=1,
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=200 if val_set_size > 0 else None,
             save_steps=1000,
@@ -179,7 +193,9 @@ def train(
                'MAP': np.zeros(len(topk)),
                'NDCG': np.zeros(len(topk))}
 
-    testData = dataset.testData
+    # testData = dataset.testData
+    test_keys = list(dataset.testData.keys())[:100]
+    testData = {k: dataset.testData[k] for k in test_keys}
     users = np.arange(dataset.n_user)
     for u in users:
         if task_type == 'general':
@@ -196,12 +212,14 @@ def train(
             ratings[exclude_index, exclude_items] = -(1 << 10)
 
         elif task_type == 'sequential':
-            if len(testData[u]) == 0:
+            if u not in testData or len(testData[u]) == 0:
                 continue
             selected_items = [[testData[u][1]] + dataset.allPos[u]]
             groundTruth = [[0]]
-            inputs = torch.LongTensor(testData[u][0]).cuda().unsqueeze(0)
-            inputs_mask = torch.ones(inputs.shape).cuda()
+            # inputs = torch.LongTensor(testData[u][0]).cuda().unsqueeze(0)
+            # inputs_mask = torch.ones(inputs.shape).cuda()
+            inputs = torch.LongTensor(testData[u][0]).to(model.llama_model.device).unsqueeze(0)
+            inputs_mask = torch.ones(inputs.shape).to(model.llama_model.device)
             _, ratings = model.predict(inputs, inputs_mask)
             ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
 
