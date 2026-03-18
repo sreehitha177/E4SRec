@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results
+Base model: huggyllama/llama-7b
+Dataset: datasets/sequential/LastFM/
+
+   Metric  Top-1    Top-5   Top-10  Top-100
+Precision   0.01 0.004000 0.008000 0.004800
+   Recall   0.01 0.020000 0.080000 0.480000
+      MRR   0.01 0.012000 0.020302 0.032922
+      MAP   0.01 0.012000 0.020302 0.032922
+     NDCG   0.01 0.013869 0.033560 0.111102
+
+Detailed Arrays:
+Precision: [0.01   0.004  0.008  0.0095 0.0048]
+Recall: [0.01 0.02 0.08 0.19 0.48]
+MRR: [0.01       0.012      0.02030159 0.02682078 0.03292248]
+MAP: [0.01       0.012      0.02030159 0.02682078 0.03292248]
+NDCG: [0.01       0.01386853 0.03356029 0.05996111 0.11110176]

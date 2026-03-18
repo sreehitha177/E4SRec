@@ -28,20 +28,23 @@ class Prompter(object):
     def generate_prompt(
         self,
         task_type: str,
+        history_text: str = ""     # To receive metadata
     ) -> List[str]:
         # returns the full prompt from instruction and optional input
         # if a label (=response, =output) is provided, it's also appended.
         if task_type == 'general':
             instruction = "Given the user ID and purchase history, predict the most suitable item for the user."
         elif task_type == 'sequential':
-            instruction = "Given the user’s purchase history, predict next possible item to be purchased."
+            # instruction = "Given the user’s purchase history, predict next possible item to be purchased."
+            instruction = "Given the following sequence of songs a user has listened to, predict the index of the next song they are likely to enjoy."
         else:
             instruction = ""
         ins = self.template["prompt_input"].format(
             instruction=instruction
         )
+        full_input = ins + history_text
         res = self.template["response_split"]
         if self._verbose:
-            print(ins + res)
-        return [ins, res]
+            print(full_input + res)
+        return [full_input, res]
 

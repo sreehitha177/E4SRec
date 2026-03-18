@@ -16,8 +16,8 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, AU
 
 def train(
     # model/data params
-    base_model: str = "", 
-    data_path: str = "",
+    base_model: str = "huggyllama/llama-7b", 
+    data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "",
     task_type: str = "",
