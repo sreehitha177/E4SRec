@@ -15,14 +15,16 @@
 
 export HF_HOME=/work/pi_dagarwal_umass_edu/snarayana_umass_edu/hf_cache
 
-# Create results directory if it doesn't exist
-mkdir -p ./results
+eval "$(conda shell.bash hook)"
+conda activate dolby
+
+mkdir -p ./results ./logs
+
+cd /work/pi_dagarwal_umass_edu/project_7/E4SRec
 
 echo "Starting Zero-Shot Evaluation for Llama-7B + SASRec..."
 
-# Execute the python script
-# We pass parameters directly via Fire
-/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python zeroshot.py \
+python zeroshot.py \
     --base_model "huggyllama/llama-7b" \
     --data_path "datasets/sequential/LastFM/" \
     --output_dir "./results" \

@@ -134,29 +134,61 @@ class SequentialDataset(Dataset):
         self.trainData, self.valData, self.testData = [], [], []
         self.n_user, self.m_item = 0, 0
 
-        with open('../datasets/sequential/' + self.dataset + '/' + self.dataset + '.txt', 'r') as f:
-            for line in f:
-                line = line.strip().split(' ')
-                user, items = int(line[0]) - 1, [int(item) for item in line[1:]]
-                self.n_user = max(self.n_user, user)
-                self.m_item = max(self.m_item, max(items))
-                if len(items) >= 3:
-                    self.trainData.append(items[:-2])
-                    self.valData.append([items[-2]])
-                    self.testData.append([items[-1]])
-                else:
-                    self.trainData.append(items)
-                    self.valData.append([])
-                    self.testData.append([])
+        base_path = "../datasets/sequential/" + self.dataset + "/"
 
-        self.n_user, self.m_item = self.n_user + 1, self.m_item + 1
+        def _read_split_file(path):
+            split = {}
+            with open(path, "r") as f:
+                for line in f:
+                    parts = line.strip().split(" ")
+                    if len(parts) < 2:
+                        continue
+                    user = int(parts[0]) - 1
+                    items = [int(item) for item in parts[1:]]
+                    split[user] = items
+            return split
 
-        self.allPos = {}
-        with open('../datasets/sequential/' + self.dataset + '/' + self.dataset + '_sample.txt', 'r') as f:
-            for line in f:
-                line = line.strip().split(' ')
-                user, items = int(line[0]) - 1, [int(item) for item in line[1:]]
-                self.allPos[user] = items
+        train_split = _read_split_file(base_path + "train.txt")
+        val_split = _read_split_file(base_path + "val.txt")
+        test_split = _read_split_file(base_path + "test.txt")
+        val_sample_split = _read_split_file(base_path + "val_sample.txt")
+        test_sample_split = _read_split_file(base_path + "test_sample.txt")
+
+        all_users = sorted(set(train_split.keys()) | set(test_split.keys()))
+        if all_users:
+            self.n_user = max(all_users) + 1
+        else:
+            self.n_user = 0
+
+        self.trainData = [[] for _ in range(self.n_user)]
+        self.valData = [[] for _ in range(self.n_user)]
+        self.testData = [[] for _ in range(self.n_user)]
+        self.valCandidates = {}
+        self.testCandidates = {}
+
+        for user in all_users:
+            train_items = train_split.get(user, [])
+            test_items = test_split.get(user, [])
+            if len(train_items) < 1 or len(test_items) < 1:
+                continue
+
+            self.trainData[user] = train_items
+            self.valData[user] = val_split.get(user, [])
+            self.testData[user] = test_items
+            self.testCandidates[user] = test_sample_split.get(user, [test_items[0]])
+            if user in val_sample_split and len(val_sample_split[user]) > 0:
+                self.valCandidates[user] = val_sample_split[user]
+
+            local_max = max(
+                max(train_items),
+                max(test_items),
+                max(self.testCandidates[user]),
+                max(self.valData[user]) if len(self.valData[user]) > 0 else 0,
+                max(self.valCandidates[user]) if user in self.valCandidates else 0,
+            )
+            self.m_item = max(self.m_item, local_max)
+
+        self.m_item = self.m_item + 1 if self.m_item > 0 else 1
 
     def negative_sampling(self, left, right, ts):
         t = np.random.randint(left, right)
@@ -164,27 +196,32 @@ class SequentialDataset(Dataset):
             t = np.random.randint(left, right)
         return t
 
-    def get_user_pos_items(self, users):
+    def get_eval_users(self, subset='test'):
+        if subset == 'val':
+            return np.array(sorted(self.valCandidates.keys()))
+        return np.array(sorted(self.testCandidates.keys()))
+
+    def get_user_pos_items(self, users, subset='test'):
         posItems = []
         for user in users:
-            posItems.append(self.allPos[user] + self.testData[user])
+            if subset == 'val':
+                posItems.append(self.valCandidates[user])
+            else:
+                posItems.append(self.testCandidates[user])
         return posItems
 
     def test_seq_generate(self, idx, subset='test'):
         seqs = []
         for i in idx:
-            if len(self.valData[i]) < 1 or len(self.testData[i]) < 1:
-                continue
             seq = np.zeros([self.maxlen], dtype=np.int32)
-            tmp = self.maxlen - 1
             if subset == 'test':
-                seq[tmp] = self.valData[i][0]
-                tmp -= 1
-            for t in reversed(self.trainData[i][:-1]):
-                seq[tmp] = t
-                tmp -= 1
-                if tmp == -1:
-                    break
+                context = self.trainData[i] + self.valData[i]
+            else:
+                context = self.trainData[i]
+
+            context = context[-self.maxlen:]
+            start = self.maxlen - len(context)
+            seq[start:] = np.array(context, dtype=np.int32)
             seqs.append(seq)
         seqs = np.array(seqs)
         return seqs
@@ -193,6 +230,9 @@ class SequentialDataset(Dataset):
         seq, pos, neg = (np.zeros([self.maxlen], dtype=np.int32),
                          np.zeros([self.maxlen], dtype=np.int32),
                          np.zeros([self.maxlen], dtype=np.int32))
+        if len(self.trainData[idx]) == 0:
+            return seq, pos, neg
+
         nxt = self.trainData[idx][-1]
         tmp = self.maxlen - 1
         ts = set(self.trainData[idx])

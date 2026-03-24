@@ -1,18 +1,18 @@
 #!/bin/bash
+#SBATCH --job-name=lastfm_prep
+#SBATCH --partition=cpu
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=01:00:00
+#SBATCH --output=logs/prep_%j.log
+#SBATCH --error=logs/prep_%j.err
 
-#SBATCH --job-name=lastfm_prep      # Name of the job
-#SBATCH --partition=cpu            # Use the CPU partition (faster queue for this)
-#SBATCH --nodes=1                  # Run on a single node
-#SBATCH --ntasks=1                 # Run a single task
-#SBATCH --cpus-per-task=4          # Request 4 CPU cores (good for pandas)
-#SBATCH --mem=32G                  # Request 32GB of RAM (adjust based on file size)
-#SBATCH --time=02:00:00            # Time limit (4 hours)
-#SBATCH --output=logs/prep_%j.log  # Standard output log (%j = Job ID)
+mkdir -p logs
 
-# 1. Load the Conda module and activate your environment
-module load conda/latest
-source activate e4srec
+eval "$(conda shell.bash hook)"
+conda activate dolby
 
-# 2. Run your preprocessing script
-# Make sure the paths inside your python script point to the /work directory
+cd /work/pi_dagarwal_umass_edu/project_7/E4SRec
 python preprocess_lastfm.py

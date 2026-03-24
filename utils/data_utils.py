@@ -68,38 +68,61 @@ class SequentialDataset(Dataset):
         self.trainData, self.valData, self.testData = [], {}, {}
         self.n_user, self.m_item = 0, 0
 
-        with open(self.dataset + 'LastFM.txt', 'r') as f:
-            for line in f:
-                line = line.strip().split(' ')
-                user, items = int(line[0]) - 1, [int(item) for item in line[1:]]
-                self.n_user = max(self.n_user, user)
-                self.m_item = max(self.m_item, max(items))
-                if len(items) >= 3:
-                    train_items = items[:-2]
-                    length = min(len(train_items), self.maxlen)
-                    for t in range(length):
-                        self.trainData.append([train_items[:-length + t], train_items[-length + t]])
-                    self.valData[user] = [items[:-2], items[-2]]
-                    self.testData[user] = [items[:-1], items[-1]]
-                else:
-                    for t in range(len(items)):
-                        self.trainData.append([items[:-len(items) + t], items[-len(items) + t]])
-                    self.valData[user] = []
-                    self.testData[user] = []
+        def _read_split_file(path):
+            split = {}
+            with open(path, "r") as f:
+                for line in f:
+                    parts = line.strip().split(" ")
+                    if len(parts) < 2:
+                        continue
+                    user = int(parts[0]) - 1
+                    items = [int(item) for item in parts[1:]]
+                    split[user] = items
+            return split
 
-        self.n_user, self.m_item = self.n_user + 1, self.m_item + 1
+        train_split = _read_split_file(self.dataset + "train.txt")
+        test_split = _read_split_file(self.dataset + "test.txt")
+        val_split = _read_split_file(self.dataset + "val.txt")
+        test_sample_split = _read_split_file(self.dataset + "test_sample.txt")
 
         self.allPos = {}
-        with open(self.dataset + 'LastFM_sample.txt', 'r') as f:
-            for line in f:
-                line = line.strip().split(' ')
-                user, items = int(line[0]) - 1, [int(item) for item in line[1:]]
-                self.allPos[user] = items
+        all_users = sorted(set(train_split.keys()) | set(test_split.keys()))
+        for user in all_users:
+            train_items = train_split.get(user, [])
+            test_items = test_split.get(user, [])
+            if len(train_items) < 1 or len(test_items) < 1:
+                continue
+
+            sample_items = test_sample_split.get(user)
+            if sample_items is None or len(sample_items) < 1:
+                sample_items = [test_items[0]]
+            self.allPos[user] = sample_items
+
+            self.testData[user] = [train_items, test_items[0]]
+            if user in val_split and len(val_split[user]) > 0:
+                self.valData[user] = [train_items, val_split[user][0]]
+            else:
+                self.valData[user] = []
+
+            length = min(len(train_items), self.maxlen)
+            for t in range(length):
+                self.trainData.append([train_items[:-length + t], train_items[-length + t]])
+
+            self.n_user = max(self.n_user, user)
+            local_max = max(
+                max(train_items),
+                max(test_items),
+                max(self.allPos[user]),
+                max(val_split[user]) if user in val_split and len(val_split[user]) > 0 else 0,
+            )
+            self.m_item = max(self.m_item, local_max)
+
+        self.n_user, self.m_item = self.n_user + 1, self.m_item + 1
 
     def get_user_pos_items(self, users):
         posItems = []
         for user in users:
-            posItems.append(self.allPos[user] + self.testData[user])
+            posItems.append(self.allPos[user])
         return posItems
 
     def __getitem__(self, idx):

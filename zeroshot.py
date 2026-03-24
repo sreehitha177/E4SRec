@@ -85,7 +85,8 @@ def zero_shot_evaluate(
     testData = {k: dataset.testData[k] for k in test_keys}
     users = np.array(test_keys) # Only evaluate selected test keys
     
-    with torch.no_grad(): 
+    num_evaluated_users = 0
+    with torch.no_grad():
         for u in users:
             if u not in testData or len(testData[u]) == 0:
                 continue
@@ -93,7 +94,7 @@ def zero_shot_evaluate(
             full_history = testData[u][0]
             seq = full_history[-256:] if len(full_history) > 256 else full_history
 
-            selected_items = [[testData[u][1]] + dataset.allPos[u]]
+            selected_items = [dataset.allPos[u]]
             groundTruth = [[0]]
             
             # inputs = torch.LongTensor(seq).to(model.llama_model.device).unsqueeze(0)
@@ -124,8 +125,10 @@ def zero_shot_evaluate(
                 results['MRR'][j] += mrr
                 results['MAP'][j] += map_val
                 results['NDCG'][j] += ndcg
+            num_evaluated_users += 1
     
-    num_evaluated_users = len(users)
+    if num_evaluated_users == 0:
+        raise RuntimeError("No eligible users found for zero-shot evaluation.")
     for key in results.keys():
         results[key] /= float(num_evaluated_users)
     
@@ -142,7 +145,7 @@ def zero_shot_evaluate(
     # Save results
     output_file = os.path.join(output_dir, "zeroshot_results.txt")
     with open(output_file, "w") as f:
-        f.write("Zero-Shot Evaluation Results\n")
+        f.write("Zero-Shot Evaluation Results (Global Temporal Split)\n")
         f.write(f"Base model: {base_model}\n")
         f.write(f"Dataset: {data_path}\n\n")
         f.write(df_results.to_string(index=False))

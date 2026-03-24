@@ -85,10 +85,13 @@ def train():
     print(f'Average loss:{avg_loss} \n Epoch time: {time.time()-t} \n')
 
 
-def test():
+def evaluate(subset='test'):
     model.eval()
     with torch.no_grad():
-        users = np.arange(dataset.n_user)
+        users = dataset.get_eval_users(subset=subset)
+        if len(users) == 0:
+            print(f'No users available for {subset} evaluation.\n')
+            return 0.0
 
         results = {'Recall': np.zeros(len(args.topk)),
                    'NDCG': np.zeros(len(args.topk))}
@@ -96,27 +99,32 @@ def test():
         for i in range(batch_num):
             batch_users = users[i*args.batch_size: (i+1)*args.batch_size] \
                 if (i+1)*args.batch_size <= len(users) else users[i*args.batch_size:]
-            selected_items = dataset.get_user_pos_items(batch_users)
+            if len(batch_users) == 0:
+                continue
+            selected_items = dataset.get_user_pos_items(batch_users, subset=subset)
 
-            groundTruth = [[len(selected_items[0]) - 1]] * len(selected_items)
-            batch_users = dataset.test_seq_generate(batch_users, 'test')
+            groundTruth = [[0]] * len(selected_items)
+            batch_users = dataset.test_seq_generate(batch_users, subset=subset)
             batch_users = torch.LongTensor(batch_users).to(args.device)
 
             ratings = model(batch_users)
-            ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
-            _, ratings_K = torch.topk(ratings, k=args.topk[-1])
+            candidate_tensor = torch.LongTensor(selected_items).to(args.device)
+            ratings = torch.gather(ratings, 1, candidate_tensor)
+            max_k = min(args.topk[-1], ratings.size(1))
+            _, ratings_K = torch.topk(ratings, k=max_k)
             ratings_K = ratings_K.cpu().numpy()
 
             r = getLabel(groundTruth, ratings_K)
             for j, k in enumerate(args.topk):
-                _, rec = RecallPrecision_atK(groundTruth, r, k)
-                ndcg = NDCG_atK(groundTruth, r, k)
+                eval_k = min(k, max_k)
+                _, rec = RecallPrecision_atK(groundTruth, r, eval_k)
+                ndcg = NDCG_atK(groundTruth, r, eval_k)
                 results['Recall'][j] += rec
                 results['NDCG'][j] += ndcg
 
         for key in results.keys():
             results[key] /= float(len(users))
-        print(f'Evaluation for User: \n')
+        print(f'{subset.upper()} evaluation:\n')
         for j, k in enumerate(args.topk):
             print(f'Recall@{k}: {results["Recall"][j]} \n '
                   f'NDCG@{k}: {results["NDCG"][j]} \n')
@@ -126,14 +134,17 @@ def test():
 # Train Model
 t_total = time.time()
 best_recall = 0.
+has_val_split = len(dataset.get_eval_users(subset='val')) > 0
 for epoch in range(args.epochs):
     print(f'Epoch {epoch}')
     train()
     torch.cuda.empty_cache()
     if (epoch + 1) % args.eval_freq == 0:
-        recall = test()
-        if recall > best_recall:
-            best_recall = recall
+        val_recall = evaluate(subset='val') if has_val_split else 0.0
+        test_recall = evaluate(subset='test')
+        metric_for_best = val_recall if has_val_split else test_recall
+        if metric_for_best > best_recall:
+            best_recall = metric_for_best
             if args.save == 1:
                 state = {'model': model.state_dict(), 'optimizer': optimizer.state_dict()}
                 torch.save(state, '../datasets/sequential/' + args.dataset + '/' + args.model + '.pth')
