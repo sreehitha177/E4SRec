@@ -7,13 +7,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
-#SBATCH --constraint=a100|l40s|a40          # Requesting A100 for higher VRAM (highly recommended)
-#SBATCH --time=02:00:00    # 2 hours should be plenty for 100 users
-#SBATCH --partition=gpu    # Change this to your cluster's GPU partition name
+#SBATCH --time=02:00:00    
+#SBATCH --partition=gpu-preempt    
 
 
 
-export HF_HOME=/work/pi_dagarwal_umass_edu/snarayana_umass_edu/hf_cache
+export HF_HOME=/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache
 
 eval "$(conda shell.bash hook)"
 conda activate dolby
@@ -24,8 +23,10 @@ cd /work/pi_dagarwal_umass_edu/project_7/E4SRec
 
 echo "Starting Zero-Shot Evaluation for Llama-7B + SASRec..."
 
-python zeroshot.py \
-    --base_model "huggyllama/llama-7b" \
+# Execute the python script
+# We pass parameters directly via Fire
+/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python zeroshot.py \
+    --base_model "Qwen/Qwen2.5-7B-Instruct" \
     --data_path "datasets/sequential/LastFM/" \
     --output_dir "./results" \
     --task_type "sequential"

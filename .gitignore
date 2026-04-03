@@ -133,3 +133,5 @@ dmypy.json
 .pyre/
 
 .tsv
+
+*.err

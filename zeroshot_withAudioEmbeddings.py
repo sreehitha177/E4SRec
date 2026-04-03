@@ -11,7 +11,7 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "huggyllama/llama-7b", 
+    base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
     data_path: str = "datasets/sequential/LastFM/",
     # Paths for your audio ablation
     audio_emb_path: str = "/project/pi_dagarwal_umass_edu/project_7/srikar/output_sample/final/audio_encodec.pt",

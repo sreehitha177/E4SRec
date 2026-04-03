@@ -10,7 +10,7 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "huggyllama/llama-7b", 
+    base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "results",
@@ -143,7 +143,7 @@ def zero_shot_evaluate(
     print("\n" + df_results.to_string(index=False))
 
     # Save results
-    output_file = os.path.join(output_dir, "zeroshot_results.txt")
+    output_file = os.path.join(output_dir, f"zeroshot_results_{base_model}.txt")
     with open(output_file, "w") as f:
         f.write("Zero-Shot Evaluation Results (Global Temporal Split)\n")
         f.write(f"Base model: {base_model}\n")
