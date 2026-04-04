@@ -48,7 +48,7 @@ At least 2 * A800 is required. Preferable 8 * A800.
 
 ### Dataset
 
-Source: `user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv` (obtained from running data_preproc/data_preprocessing.py)
+Source: `user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv` (obtained from running data_preproc/data_preprocessing.py on the lastfm-1k dataset)
 (4.2M interactions, 814 users with ≥5 interactions, 383,670 unique tracks)
 
 ### Data Split — Global Temporal Split
