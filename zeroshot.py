@@ -26,7 +26,8 @@ def zero_shot_evaluate(
     batch_size: int = 1,  
     prompt_template_name: str = "alpaca",
     
-    use_sasrec_embedding: bool = True, 
+    use_sasrec_embedding: bool = True,
+    device_map: str = "auto",
 ):
     print(f"\nConfiguration:")
     print(f"  Base model: {base_model}")
@@ -61,7 +62,7 @@ def zero_shot_evaluate(
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
         lora_target_modules=lora_target_modules,
-        device_map="auto", # Recommended for 7B models
+        device_map=device_map,        
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
@@ -133,25 +134,23 @@ def zero_shot_evaluate(
         results[key] /= float(num_evaluated_users)
     
     # Output Table
-    df_results = pd.DataFrame({
-        "Metric": results.keys(),
-        "Top-1": [round(results[k][0], 4) for k in results],
-        "Top-5": [round(results[k][1], 4) for k in results],
-        "Top-10": [round(results[k][2], 4) for k in results],
-        "Top-100": [round(results[k][4], 4) for k in results]
-    })
-    print("\n" + df_results.to_string(index=False))
+    df_results = pd.DataFrame(
+        {k: np.round(results[k], 3) for k in results},
+        index=[f"Top-{k}" for k in topk]
+    )
+    np.set_printoptions(precision=3, suppress=True)
+    print("\n" + df_results.to_string(float_format=lambda x: f"{x:.3f}"))
 
     # Save results
-    output_file = os.path.join(output_dir, f"zeroshot_results_{base_model}.txt")
+    output_file = os.path.join(output_dir, f"zeroshot_results_{base_model.replace('/', '_')}.txt")
     with open(output_file, "w") as f:
         f.write("Zero-Shot Evaluation Results (Global Temporal Split)\n")
         f.write(f"Base model: {base_model}\n")
         f.write(f"Dataset: {data_path}\n\n")
-        f.write(df_results.to_string(index=False))
+        f.write(df_results.to_string(float_format=lambda x: f"{x:.3f}"))
         f.write("\n\nDetailed Arrays:\n")
         for key in results:
-            f.write(f"{key}: {np.round(results[key], 4)}\n")
+            f.write(f"{key}: {np.round(results[key], 3)}\n")
 
     print(f"\nResults saved to {output_file}")
 

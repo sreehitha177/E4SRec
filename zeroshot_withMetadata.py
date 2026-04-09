@@ -4,26 +4,25 @@ import numpy as np
 import pandas as pd
 from typing import List
 import fire
-from model_new import LLM4Rec
+from model import LLM4Rec
 from utils.data_utils import SequentialDataset
 from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, getLabel
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "huggyllama/llama-7b", 
+    base_model: str = "Qwen/Qwen2.5-7B-Instruct",
     data_path: str = "datasets/sequential/LastFM/",
+    metadata_path: str = "/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/shared/top_50k_full_augmented.csv",
     cache_dir: str = "",
     output_dir: str = "results",
     task_type: str = "sequential",
-    cutoff_len: int = 4096,
     lora_r: int = 16,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = ["q_proj", "v_proj", "k_proj", "o_proj"],
-    max_test_users: int = 100,  
-    batch_size: int = 1,  
+    max_test_users: int = 0,
     prompt_template_name: str = "alpaca",
-    use_sasrec_embedding: bool = True, 
+    device_map: str = "auto",
 ):
     print(f"\nConfiguration:")
     print(f"  Base model: {base_model}")
@@ -45,37 +44,36 @@ def zero_shot_evaluate(
     
     print("Building Metadata Lookup Table...")
     master_map = pd.read_csv(os.path.join(data_path, "item_id_master_map.csv"))
-    full_meta = pd.read_csv("/work/pi_dagarwal_umass_edu/project_7/swetha/lastfm_all_mgphot_labels.csv")
-    
-    # Merge them to link YOUR item_id to metadata
-    merged_meta = master_map.merge(full_meta, on="track_index")
-    
-    # Create the lookup: { item_id: "Description String" }
+    full_meta = pd.read_csv(metadata_path)
+
+    # Join on normalised artist + track name 
+    full_meta['_key'] = full_meta['artist_name'].str.lower().str.strip() + '||' + \
+                        full_meta['track_name'].str.lower().str.strip()
+    master_map['_key'] = master_map['artist_name'].str.lower().str.strip() + '||' + \
+                         master_map['track_name'].str.lower().str.strip()
+
+    merged_meta = full_meta.merge(master_map[['item_id', '_key']], on='_key', how='inner') \
+                            .drop_duplicates(subset=['_key'])
+    print(f"   Metadata file: {len(full_meta)} rows | master items: {len(master_map)} | matched: {len(merged_meta)}")
+
+    # Build lookup: { item_id -> description string }
+    def _fmt(val, suffix=''):
+        return f"{val}{suffix}" if pd.notna(val) and str(val).strip() not in ('', 'nan') else None
+
     meta_lookup = {}
     for _, row in merged_meta.iterrows():
-        # Using track_name_x/artist_name_x because they come from the master_map columns
-        desc = f"'{row['track_name_x']}' by {row['artist_name_x']} [{row['genre']}, {row['tempo']}]"
+        parts = []
+        if _fmt(row.get('genre')): parts.append(f"genre: {row['genre']}")
+        if _fmt(row.get('year')):  parts.append(f"year: {int(row['year'])}")
+        if _fmt(row.get('tags')):  parts.append(f"tags: {row['tags']}")
+        if _fmt(row.get('tempo')): parts.append(f"tempo: {row['tempo']:.0f} bpm")
+        if _fmt(row.get('valence')): parts.append(f"valence: {row['valence']:.2f}")
+        if _fmt(row.get('energy')):  parts.append(f"energy: {row['energy']:.2f}")
+        meta_str = ' | '.join(parts)
+        desc = f"'{row['track_name']}' by {row['artist_name']}"
+        if meta_str:
+            desc += f" [{meta_str}]"
         meta_lookup[row['item_id']] = desc
-    
-    # print(f"Meta lookup size: {len(meta_lookup)}", flush=True)
-    # # Check the first few entries of your lookup
-    # print("--- LOOKUP SAMPLE ---")
-    # for k in list(meta_lookup.keys())[:5]:
-    #     print(f"ID {k}: {meta_lookup[k]}")
-
-    # # Check what ID 1 actually is in your lookup
-    # print(f"--- VERIFYING ID 1 ---")
-    # print(f"Metadata for ID 1: {meta_lookup.get(1, 'NOT FOUND')}")
-    # # --- VERIFICATION BLOCK ---
-    # test_id = 1
-    # # 1. What does your current lookup say ID 1 is?
-    # print(f"DEBUG: My lookup says ID {test_id} is: {meta_lookup.get(test_id)}")
-
-    # # 2. What does the Master Map say ID 1's track_name is?
-    # master_map = pd.read_csv(os.path.join(data_path, "item_id_master_map.csv"))
-    # sample_row = master_map[master_map['item_id'] == test_id]
-    # print(f"DEBUG: Master Map says ID {test_id} is: {sample_row['track_name'].values[0]}")
-    # # --------------------------
 
     print(f"\nLoading base model: {base_model}")
     prompter = Prompter(prompt_template_name)
@@ -84,13 +82,13 @@ def zero_shot_evaluate(
         base_model=base_model,
         task_type=task_type,
         cache_dir=cache_dir,
-        input_dim=item_embed.shape[1], # Dynamic based on SASRec weights
+        input_dim=item_embed.shape[1],
         output_dim=dataset.m_item,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
         lora_target_modules=lora_target_modules,
-        device_map="auto", # Recommended for 7B models
+        device_map=device_map,
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
@@ -108,13 +106,14 @@ def zero_shot_evaluate(
     }
     
     test_keys = list(dataset.testData.keys())
-    if max_test_users:
+    if max_test_users and max_test_users > 0:
         test_keys = test_keys[:max_test_users]
     
     testData = {k: dataset.testData[k] for k in test_keys}
     users = np.array(test_keys) # Only evaluate selected test keys
-    
-    with torch.no_grad(): 
+
+    num_evaluated_users = 0
+    with torch.no_grad():
         for u in users:
             if u not in testData or len(testData[u]) == 0:
                 continue
@@ -176,31 +175,31 @@ def zero_shot_evaluate(
                 results['MRR'][j] += mrr
                 results['MAP'][j] += map_val
                 results['NDCG'][j] += ndcg
-    
-    num_evaluated_users = len(users)
+            num_evaluated_users += 1
+
+    if num_evaluated_users == 0:
+        raise RuntimeError("No eligible users found for zero-shot evaluation.")
     for key in results.keys():
         results[key] /= float(num_evaluated_users)
-    
+
     # Output Table
-    df_results = pd.DataFrame({
-        "Metric": results.keys(),
-        "Top-1": [results[k][0] for k in results],
-        "Top-5": [results[k][1] for k in results],
-        "Top-10": [results[k][2] for k in results],
-        "Top-100": [results[k][4] for k in results]
-    })
-    print("\n" + df_results.to_string(index=False))
+    df_results = pd.DataFrame(
+        {k: np.round(results[k], 3) for k in results},
+        index=[f"Top-{k}" for k in topk]
+    )
+    np.set_printoptions(precision=3, suppress=True)
+    print("\n" + df_results.to_string(float_format=lambda x: f"{x:.3f}"))
 
     # Save results
-    output_file = os.path.join(output_dir, "zero_shot_with_metadata_results.txt")
+    output_file = os.path.join(output_dir, f"zeroshot_METADATA_{base_model.replace('/', '_')}.txt")
     with open(output_file, "w") as f:
         f.write("Zero-Shot Evaluation Results\n")
         f.write(f"Base model: {base_model}\n")
         f.write(f"Dataset: {data_path}\n\n")
-        f.write(df_results.to_string(index=False))
+        f.write(df_results.to_string(float_format=lambda x: f"{x:.3f}"))
         f.write("\n\nDetailed Arrays:\n")
         for key in results:
-            f.write(f"{key}: {results[key]}\n")
+            f.write(f"{key}: {np.round(results[key], 3)}\n")
 
     print(f"\nResults saved to {output_file}")
 

@@ -1,29 +1,42 @@
 #!/bin/bash
-#SBATCH --job-name=E4SRec_baseline
-#SBATCH --partition=gpu-preempt    # Use preempt if 'gpu' is full
-#SBATCH --gres=gpu:1               # Request 1 GPU
-#SBATCH --constraint=a100|l40s|a40          # Requesting A100 for higher VRAM (highly recommended)
-#SBATCH --mem=64G                  # 7B models need decent system RAM
-#SBATCH --time=08:00:00            # Give it plenty of time
+#SBATCH --job-name=finetune 
+#SBATCH --partition=gpu    
+#SBATCH --nodes=1 
+#SBATCH --gres=gpu:1              
+#SBATCH --constraint=vram48
+#SBATCH --mem=128G
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/finetune_%j.log
+#SBATCH --error=logs/finetune_%j.err
 
 module load conda/latest
 conda activate e4srec
 
+cd /home/snarayana_umass_edu/E4SRec-1
+mkdir -p logs results
+
+export HF_HOME=/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export NCCL_DEBUG=WARN
+export TOKENIZERS_PARALLELISM=false
+
+
 # Set paths
-DATA_PATH="/home/snarayana_umass_edu/E4SRec-1/datasets/sequential/LastFM/"
-OUTPUT_DIR="./results"
+DATA_PATH="datasets/sequential/LastFM/"
+OUTPUT_DIR="./trainer_output"
 
 # Run the script
-/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python finetune.py \
+CHECKPOINT=$(ls -d "$OUTPUT_DIR"/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1)
+
+python finetune.py \
   --base_model "huggyllama/llama-7b" \
   --task_type "sequential" \
   --data_path "$DATA_PATH" \
   --output_dir "$OUTPUT_DIR" \
-  --results_file "$OUTPUT_DIR/finetune_results.txt"
   --batch_size 128 \
-  --micro_batch_size 4 \
-  --num_epochs 1 \
+  --micro_batch_size 2 \
+  --num_epochs 3 \
   --learning_rate 3e-4 \
   --lora_r 16 \
-  --cutoff_len 512
+  --cutoff_len 256 \
+  ${CHECKPOINT:+--resume_from_checkpoint "$CHECKPOINT"}

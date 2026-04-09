@@ -90,6 +90,7 @@ def train(
     if ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
         gradient_accumulation_steps = gradient_accumulation_steps // world_size
+        print(f"DDP enabled: LOCAL_RANK={os.environ.get('LOCAL_RANK')}, WORLD_SIZE={world_size}")  
         print("gradient_accumulation_steps: ", gradient_accumulation_steps)
 
     # Check if parameter passed or if set within environ
@@ -149,8 +150,13 @@ def train(
             # dataloader_num_workers=16,
             fp16=True,
             logging_steps=1,
-            optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+
+            optim="adamw_8bit",
+            gradient_checkpointing=True,         # trades compute for memory
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+            dataloader_num_workers=0,            # faster data loading
+
+            eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=200 if val_set_size > 0 else None,
             save_steps=1000,
@@ -159,7 +165,6 @@ def train(
             save_total_limit=2,
             load_best_model_at_end=True if val_set_size > 0 else False,
             ddp_find_unused_parameters=False if ddp else None,
-            group_by_length=group_by_length,
             report_to="none",
             run_name=None,
         ),

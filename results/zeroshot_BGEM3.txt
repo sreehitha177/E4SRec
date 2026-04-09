@@ -1,0 +1,17 @@
+Zero-Shot Evaluation — SASRec + BGEM3
+Base model: Qwen/Qwen2.5-7B-Instruct
+Node path:  /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_6
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.000   0.000 0.000 0.000 0.000
+Top-5        0.000   0.000 0.000 0.000 0.000
+Top-10       0.000   0.000 0.000 0.000 0.000
+Top-20       0.008   0.150 0.010 0.010 0.037
+Top-100      0.006   0.550 0.017 0.017 0.105
+
+Detailed arrays:
+Precision: [0.    0.    0.    0.008 0.006]
+Recall: [0.   0.   0.   0.15 0.55]
+MRR: [0.    0.    0.    0.01  0.017]
+MAP: [0.    0.    0.    0.01  0.017]
+NDCG: [0.    0.    0.    0.037 0.105]

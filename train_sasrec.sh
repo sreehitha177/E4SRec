@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sasrec_train
 #SBATCH --partition=gpu
-#SBATCH --constraint=sm_70
+#SBATCH --constraint=a40
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -13,12 +13,10 @@
 
 mkdir -p logs
 
-eval "$(conda shell.bash hook)"
-conda activate dolby
 
-cd /work/pi_dagarwal_umass_edu/project_7/E4SRec/baseline
+cd /home/snarayana_umass_edu/E4SRec-1/baseline
 
-python main_sequential.py \
+/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python main_sequential.py \
     --model SASRec \
     --dataset LastFM \
     --save 1 \

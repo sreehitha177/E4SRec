@@ -5,10 +5,10 @@ import polars as pl
 
 
 INPUT_PATH = (
-    "/work/pi_dagarwal_umass_edu/project_7/srikar/dolby-research/dataset/"
-    "lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv"
+    "/home/snarayana_umass_edu/E4SRec-1/"
+    "userid-timestamp-artid-artname-traid-traname.tsv"
 )
-PARQUET_PATH = "/work/pi_dagarwal_umass_edu/project_7/hmagapu/lastfm1k.parquet"
+PARQUET_PATH = "/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/lastfm1k.parquet"
 
 MIN_TRACKS_IN_SESSION = 10
 MIN_SESSIONS_IN_HISTORY = 50

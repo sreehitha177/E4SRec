@@ -5,21 +5,22 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=48G
 #SBATCH --gres=gpu:1
 #SBATCH --time=02:00:00    
-#SBATCH --partition=gpu-preempt    
+#SBATCH --partition=gpu-preempt
+#SBATCH --constraint=a40
 
 
 
 export HF_HOME=/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache
 
-eval "$(conda shell.bash hook)"
-conda activate dolby
+module load conda/latest
+conda activate /work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec
 
 mkdir -p ./results ./logs
 
-cd /work/pi_dagarwal_umass_edu/project_7/E4SRec
+cd /home/snarayana_umass_edu/E4SRec-1
 
 echo "Starting Zero-Shot Evaluation for Llama-7B + SASRec..."
 
@@ -29,6 +30,6 @@ echo "Starting Zero-Shot Evaluation for Llama-7B + SASRec..."
     --base_model "Qwen/Qwen2.5-7B-Instruct" \
     --data_path "datasets/sequential/LastFM/" \
     --output_dir "./results" \
-    --task_type "sequential"
+    --device_map "cpu"
 
 echo "Evaluation complete. Results saved in ./results/"

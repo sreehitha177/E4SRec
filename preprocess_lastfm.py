@@ -17,8 +17,7 @@ from typing import Dict, List, Tuple
 import polars as pl
 
 PREPROCESSED_CSV = (
-    "/work/pi_dagarwal_umass_edu/project_7/hmagapu/"
-    "user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv"
+    "/home/snarayana_umass_edu/E4SRec-1/data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv"
 )
 
 OUTPUT_DIR = "datasets/sequential/LastFM"

@@ -135,3 +135,17 @@ dmypy.json
 .tsv
 
 *.err
+
+# Large model downloads
+models--*/
+
+# Model checkpoints (LFS not supported on public fork)
+*.pth
+
+# Lock files and cache tags
+.locks/
+CACHEDIR.TAG
+
+# Large raw data files
+userid-timestamp-artid-artname-traid-traname.tsv
+data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv
