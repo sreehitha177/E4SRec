@@ -103,9 +103,9 @@ Or directly:
 
 Results are written to `results/zeroshot_results.txt`.
 
-### Zero-Shot Results
+### Zero-Shot Results with LLaMa-7B:
 
-#### Global Temporal Split (current)
+#### Session + Global Temporal Split (current)
 
 | Metric    | @1     | @5     | @10    | @100   |
 |-----------|--------|--------|--------|--------|
@@ -115,7 +115,7 @@ Results are written to `results/zeroshot_results.txt`.
 | MAP       | 0.0063 | 0.0128 | 0.0172 | 0.0286 |
 | NDCG      | 0.0063 | 0.0155 | 0.0261 | 0.1114 |
 
-#### Leave-Last-Out / Session Split (previous)
+#### Session + Leave-Last-Out (previous)
 
 | Metric    | @1     | @5     | @10    | @100   |
 |-----------|--------|--------|--------|--------|
@@ -124,6 +124,17 @@ Results are written to `results/zeroshot_results.txt`.
 | MRR       | 0.0061 | 0.0123 | 0.0171 | 0.0283 |
 | MAP       | 0.0061 | 0.0123 | 0.0171 | 0.0283 |
 | NDCG      | 0.0061 | 0.0150 | 0.0268 | 0.1068 |
+
+#### Full history (no session) + Leave-Last-Out (previous)
+
+| Metric    | @1     | @5     | @10    | @100   |
+|-----------|--------|--------|--------|--------|
+| Precision | 0.0077 | 0.0031 | 0.0031 | 0.0050 |
+| Recall    | 0.0077 | 0.0155 | 0.0309 | 0.4967 |
+| MRR       | 0.0077 | 0.0101 | 0.0120 | 0.0230 |
+| MAP       | 0.0077 | 0.0101 | 0.0120 | 0.0230 |
+| NDCG      | 0.0077 | 0.0114 | 0.0162 | 0.0999 |
+
 
 ### Modified Files
 
