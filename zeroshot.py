@@ -10,7 +10,8 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
+    # base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
+    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B-Instruct/snapshots/5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd",
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "results",

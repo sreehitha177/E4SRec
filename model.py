@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -57,7 +58,7 @@ class LLM4Rec(nn.Module):
         self.llama_model = AutoModel.from_pretrained(
             model_path,
             torch_dtype=_dtype,
-            cache_dir=args['cache_dir'],
+            cache_dir=args['cache_dir'] or None,
             device_map=self.args['device_map'],
         )
         self.llama_model.enable_input_require_grads()  # needed for LoRA + grad checkpointing

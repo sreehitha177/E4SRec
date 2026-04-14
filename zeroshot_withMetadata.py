@@ -10,10 +10,10 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "Qwen/Qwen2.5-7B-Instruct",
+    base_model: str = "Qwen/Qwen2.5-32B-Instruct",
     data_path: str = "datasets/sequential/LastFM/",
     metadata_path: str = "/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/shared/top_50k_full_augmented.csv",
-    cache_dir: str = "",
+    cache_dir: str = "/datasets/ai/qwen2/hub",
     output_dir: str = "results",
     task_type: str = "sequential",
     lora_r: int = 16,
@@ -55,6 +55,13 @@ def zero_shot_evaluate(
     merged_meta = full_meta.merge(master_map[['item_id', '_key']], on='_key', how='inner') \
                             .drop_duplicates(subset=['_key'])
     print(f"   Metadata file: {len(full_meta)} rows | master items: {len(master_map)} | matched: {len(merged_meta)}")
+
+    # Fallback lookup: { item_id -> "'track' by artist" } for items without full metadata
+    name_lookup = {
+        row['item_id']: f"'{row['track_name']}' by {row['artist_name']}"
+        for _, row in master_map.iterrows()
+        if pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name'))
+    }
 
     # Build lookup: { item_id -> description string }
     def _fmt(val, suffix=''):
@@ -128,7 +135,7 @@ def zero_shot_evaluate(
             history_lines = []
             for i, item_id in enumerate(recent_history):
                 # Fetch the text description from our lookup
-                desc = meta_lookup.get(item_id, "Unknown Track")
+                desc = meta_lookup.get(item_id, name_lookup.get(item_id, "Unknown Track"))
                 history_lines.append(f"{i+1}. {desc}")
             
             # history 

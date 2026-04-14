@@ -1,26 +1,30 @@
 import os
-import sys
 from typing import List
 
 import fire
-import torch
 import pickle
 import numpy as np
+import torch
 import transformers
-from transformers import LlamaForCausalLM, LlamaTokenizer
-from utils.prompter import Prompter
+
 from model import LLM4Rec
-from utils.data_utils import BipartiteGraphDataset, BipartiteGraphCollator, SequentialDataset, SequentialCollator
-from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, AUC, getLabel
+from utils.data_utils import (
+    BipartiteGraphCollator,
+    BipartiteGraphDataset,
+    SequentialCollator,
+    SequentialDataset,
+)
+from utils.eval_utils import MAP_atK, MRR_atK, NDCG_atK, RecallPrecision_atK, getLabel
+from utils.prompter import Prompter
 
 
 def train(
     # model/data params
-    base_model: str = "huggyllama/llama-7b", 
+    base_model: str = "/home/snarayana_umass_edu/E4SRec-1/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28",
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "",
-    task_type: str = "",
+    task_type: str = "sequential",
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 8,
@@ -34,8 +38,8 @@ def train(
     lora_r: int = 16,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
-    # from peft docs: ["q_proj", "k_proj", "v_proj", "o_proj", "fc_in", "fc_out", "wte", "gate_proj", "down_proj", "up_proj"]
-    lora_target_modules: List[str] = ["gate_proj", "down_proj", "up_proj"],
+    # Qwen 2.5 attention projections; override from CLI for other backbones.
+    lora_target_modules: List[str] = ["q_proj", "k_proj", "v_proj", "o_proj"],
     # llm hyperparams
     train_on_inputs: bool = False,  # if False, masks out inputs in loss
     add_eos_token: bool = False,
@@ -77,9 +81,9 @@ def train(
             f"wandb_log_model: {wandb_log_model}\n"
             f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
         )
-    assert (
-        base_model
-    ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
+    assert base_model, "Please specify a --base_model, e.g. a local Qwen snapshot path"
+    if batch_size % micro_batch_size != 0:
+        raise ValueError("batch_size must be divisible by micro_batch_size")
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     prompter = Prompter(prompt_template_name)
@@ -107,20 +111,32 @@ def train(
 
     if task_type == 'general':
         dataset = BipartiteGraphDataset(data_path)
-        user_embed, item_embed = (pickle.load(open(data_path + 'VanillaMF_user_embed.pkl', 'rb')),
-                                  pickle.load(open(data_path + 'VanillaMF_item_embed.pkl', 'rb')))
+        user_embed, item_embed = (
+            pickle.load(open(data_path + 'VanillaMF_user_embed.pkl', 'rb')),
+            pickle.load(open(data_path + 'VanillaMF_item_embed.pkl', 'rb')),
+        )
         item_embed = torch.cat([item_embed.mean(dim=0).unsqueeze(0), item_embed], dim=0)
         data_collator = BipartiteGraphCollator()
+        input_dim = 64
     elif task_type == 'sequential':
+        sasrec_embed_path = os.path.join(data_path, "SASRec_item_embed.pkl")
+        if not os.path.exists(sasrec_embed_path):
+            raise FileNotFoundError(
+                f"Missing sequential item embeddings: {sasrec_embed_path}. "
+                "Generate SASRec_item_embed.pkl before finetuning."
+            )
         dataset = SequentialDataset(data_path, 50)
-        user_embed, item_embed = None, pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
+        user_embed, item_embed = None, pickle.load(open(sasrec_embed_path, 'rb'))
         data_collator = SequentialCollator()
+        input_dim = item_embed.shape[1]
+    else:
+        raise ValueError("task_type must be either 'general' or 'sequential'")
 
     model = LLM4Rec(
         base_model=base_model,
         task_type=task_type,
         cache_dir=cache_dir,
-        input_dim=64,
+        input_dim=input_dim,
         output_dim=dataset.m_item,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
@@ -147,19 +163,18 @@ def train(
             warmup_steps=warmup_steps,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            # dataloader_num_workers=16,
-            fp16=True,
+            # fp16=True,
+            bf16=True,
             logging_steps=1,
-
-            optim="adamw_8bit",
+            optim="adamw_torch",
             gradient_checkpointing=True,         # trades compute for memory
             gradient_checkpointing_kwargs={"use_reentrant": False},
-            dataloader_num_workers=0,            # faster data loading
-
+            dataloader_num_workers=0,
+            # evaluation_strategy="steps" if val_set_size > 0 else "no",
             eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=200 if val_set_size > 0 else None,
-            save_steps=1000,
+            save_steps=500,
             lr_scheduler_type=lr_scheduler,
             output_dir=output_dir,
             save_total_limit=2,
@@ -170,9 +185,6 @@ def train(
         ),
         data_collator=data_collator,
     )
-
-    # if torch.__version__ >= "2" and sys.platform != "win32":
-    #     model = torch.compile(model)
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
@@ -205,8 +217,9 @@ def train(
                 continue
             selected_items = [[testData[u][1]] + dataset.allPos[u]]
             groundTruth = [[0]]
-            inputs = torch.LongTensor(testData[u][0]).cuda().unsqueeze(0)
-            inputs_mask = torch.ones(inputs.shape).cuda()
+            device = next(model.llama_model.parameters()).device
+            inputs = torch.LongTensor(testData[u][0]).to(device).unsqueeze(0)
+            inputs_mask = torch.ones(inputs.shape, device=device)
             _, ratings = model.predict(inputs, inputs_mask)
             ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
 
@@ -235,6 +248,7 @@ def train(
               f'MAP@{k}: {results["MAP"][j]} \n '
               f'NDCG@{k}: {results["NDCG"][j]} \n')
 
+    os.makedirs(output_dir, exist_ok=True)
     model.llama_model.save_pretrained(output_dir)
     model_path = os.path.join(output_dir, "adapter.pth")
     if task_type == 'general':
@@ -243,6 +257,8 @@ def train(
     elif task_type == 'sequential':
         input_proj, score = model.input_proj.state_dict(), model.score.state_dict()
         torch.save({'input_proj': input_proj, 'score': score}, model_path)
+    print(f"Saved PEFT adapter to {output_dir}")
+    print(f"Saved projection heads to {model_path}")
 
 
 if __name__ == "__main__":
