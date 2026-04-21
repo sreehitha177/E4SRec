@@ -46,7 +46,7 @@ echo "Node path: ${NODE_PATH}"
 
 
 /work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python zeroshot_withAudioEmbeddings.py \
-    --base_model "Qwen/Qwen2.5-7B-Instruct" \
+    --base_model "/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--prithivMLmods--Llama-Song-Stream-3B-Instruct/snapshots/56536079fccb29711c0ab5aff0de9372317cba3b" \
     --data_path "datasets/sequential/LastFM/" \
     --node_path "$NODE_PATH" \
     --model_name "$MODEL_NAME" \

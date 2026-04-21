@@ -13,8 +13,9 @@ import re
 from pathlib import Path
 
 RESULTS_DIR = Path("/home/snarayana_umass_edu/E4SRec-1/results")
+BASELINE_FILE = RESULTS_DIR / "zeroshot_results_Qwen_Qwen2.5-7B-Instruct.txt"
 TOPK        = [1, 5, 10, 20, 100]
-METRICS     = ['Recall', 'NDCG', 'MRR', 'Precision']
+METRICS     = ['Recall', 'NDCG', 'MRR', 'MAP', 'Precision']
 
 AUDIO_MODELS  = ['CLAP', 'MERT', 'MUSIC2VEC', 'ENCODEC', 'MFCC']
 LYRIC_MODELS  = ['MINILM', 'BGEM3', 'MPNET', 'MULTILINGUAL', 'BERT']
@@ -38,15 +39,20 @@ def model_key(path):
 
 # ── Load all results ──────────────────────────────────────────────────────
 all_data = {}   # key → data dict
-for f in RESULTS_DIR.glob("*.txt"):
-    key  = model_key(f)
+for f in sorted(RESULTS_DIR.glob("*.txt")):
+    if f == BASELINE_FILE:
+        key = "SASRec-only"
+    elif f.name.startswith("zeroshot_results_"):
+        continue
+    else:
+        key = model_key(f)
     data = parse_file(f)
     if data:
         all_data[key] = data
 
 # ── Print one group table ─────────────────────────────────────────────────
 def print_group(title, model_keys):
-    col_w   = 9   # width per metric value
+    col_w   = 10  # width per metric value
     name_w  = 16  # model name column
     topk_w  = 6   # Top-k label
 
@@ -95,7 +101,7 @@ def print_group(title, model_keys):
 # ── Print overall summary at Top-10 ──────────────────────────────────────
 def print_summary():
     ki      = TOPK.index(10)
-    col_w   = 9
+    col_w   = 10
     name_w  = 18
     cat_w   = 8
     sep_width = name_w + cat_w + len(METRICS) * col_w
@@ -172,4 +178,3 @@ with open(OUT_FILE, "w") as f:
     sys.stdout = sys.__stdout__
 
 print(f"\nResults saved to {OUT_FILE}")
-

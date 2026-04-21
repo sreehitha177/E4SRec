@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Dataset: datasets/sequential/LastFM/
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.003   0.003 0.003 0.003 0.003
+Top-5        0.003   0.017 0.008 0.008 0.010
+Top-10       0.004   0.044 0.011 0.011 0.019
+Top-20       0.004   0.083 0.014 0.014 0.028
+Top-100      0.005   0.475 0.022 0.022 0.097
+
+Detailed Arrays:
+Precision: [0.003 0.003 0.004 0.004 0.005]
+Recall: [0.003 0.017 0.044 0.083 0.475]
+MRR: [0.003 0.008 0.011 0.014 0.022]
+MAP: [0.003 0.008 0.011 0.014 0.022]
+NDCG: [0.003 0.01  0.019 0.028 0.097]

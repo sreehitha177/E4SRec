@@ -105,16 +105,16 @@ class LLM4Rec(nn.Module):
         # self.input_embeds = nn.Embedding.from_pretrained(self.args['input_embeds'], freeze=True)
         # self.input_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size)
 
-        # get device from llama_model
+        # get device and dtype from llama_model
         device = next(self.llama_model.parameters()).device
+        dtype = next(self.llama_model.parameters()).dtype
         if self.task_type == 'general': 
-            self.user_embeds = nn.Embedding.from_pretrained(self.args['user_embeds']).to(device)
-            self.user_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device)
-        self.input_embeds = nn.Embedding.from_pretrained(self.args['input_embeds']).to(device)
-        self.input_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device)        
+            self.user_embeds = nn.Embedding.from_pretrained(self.args['user_embeds']).to(device=device, dtype=dtype)
+            self.user_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device=device, dtype=dtype)
+        self.input_embeds = nn.Embedding.from_pretrained(self.args['input_embeds']).to(device=device, dtype=dtype)
+        self.input_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device=device, dtype=dtype)
 
-        # self.score = nn.Linear(self.llama_model.config.hidden_size, self.output_dim, bias=False).to(device)
-        self.score = nn.Linear(self.llama_model.config.hidden_size, self.output_dim, bias=False)
+        self.score = nn.Linear(self.llama_model.config.hidden_size, self.output_dim, bias=False).to(device=device, dtype=dtype)
 
 
     def predict(self, inputs, inputs_mask, history_metadata=None):
@@ -151,7 +151,8 @@ class LLM4Rec(nn.Module):
 
         outputs = self.llama_model(inputs_embeds=inputs.to(next(self.llama_model.parameters()).dtype), attention_mask=attention_mask, return_dict=True)
         pooled_output = outputs.last_hidden_state[:, -1]
-        pooled_logits = self.score.to(device=pooled_output.device, dtype=pooled_output.dtype)(pooled_output)
+        pooled_logits = self.score(pooled_output)
+        # pooled_logits = self.score.to(device=pooled_output.device, dtype=pooled_output.dtype)(pooled_output)
 
         return outputs, pooled_logits.view(-1, self.output_dim)
 

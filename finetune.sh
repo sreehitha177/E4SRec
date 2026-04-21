@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
-#SBATCH --constraint=vram48     
+#SBATCH --constraint=vram80     
 #SBATCH --mem=32G               
 #SBATCH --time=24:00:00         
 #SBATCH --output=logs/finetune_%j.log
@@ -52,7 +52,7 @@ python finetune.py \
     --task_type "sequential" \
     --data_path "$DATA_PATH" \
     --output_dir "$OUTPUT_DIR" \
-    --batch_size 64 \
+    --batch_size 32 \
     --micro_batch_size 4 \
     --num_epochs 3 \
     --learning_rate 3e-4 \

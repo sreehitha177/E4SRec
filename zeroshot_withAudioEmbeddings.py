@@ -12,7 +12,7 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "Qwen/Qwen2.5-7B-Instruct",
+    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B/snapshots/1818d35814b8319459f4bd55ed1ac8709630f003",
     data_path: str = "datasets/sequential/LastFM/",
     # Path to the node directory (e.g. .../audio_embeddings/node_0 or .../lyrics_embeddings/node_5)
     node_path: str = "",

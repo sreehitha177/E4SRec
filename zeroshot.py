@@ -11,7 +11,7 @@ from utils.prompter import Prompter
 
 def zero_shot_evaluate(
     # base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
-    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B-Instruct/snapshots/5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd",
+    base_model: str = "/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9",
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "results",

@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results (Global Temporal Split)
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--prithivMLmods--Llama-Song-Stream-3B-Instruct/snapshots/56536079fccb29711c0ab5aff0de9372317cba3b
+Dataset: datasets/sequential/LastFM/
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.006   0.006 0.006 0.006 0.006
+Top-5        0.006   0.030 0.015 0.015 0.019
+Top-10       0.005   0.052 0.018 0.018 0.026
+Top-20       0.005   0.099 0.021 0.021 0.037
+Top-100      0.005   0.520 0.029 0.029 0.110
+
+Detailed Arrays:
+Precision: [0.006 0.006 0.005 0.005 0.005]
+Recall: [0.006 0.03  0.052 0.099 0.52 ]
+MRR: [0.006 0.015 0.018 0.021 0.029]
+MAP: [0.006 0.015 0.018 0.021 0.029]
+NDCG: [0.006 0.019 0.026 0.037 0.11 ]

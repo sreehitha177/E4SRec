@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results (Global Temporal Split)
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9
+Dataset: datasets/sequential/LastFM/
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.005   0.005 0.005 0.005 0.005
+Top-5        0.004   0.022 0.010 0.010 0.013
+Top-10       0.006   0.056 0.015 0.015 0.024
+Top-20       0.006   0.121 0.019 0.019 0.040
+Top-100      0.005   0.522 0.027 0.027 0.110
+
+Detailed Arrays:
+Precision: [0.005 0.004 0.006 0.006 0.005]
+Recall: [0.005 0.022 0.056 0.121 0.522]
+MRR: [0.005 0.01  0.015 0.019 0.027]
+MAP: [0.005 0.01  0.015 0.019 0.027]
+NDCG: [0.005 0.013 0.024 0.04  0.11 ]
