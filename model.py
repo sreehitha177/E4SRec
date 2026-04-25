@@ -26,6 +26,7 @@ class LLM4Rec(nn.Module):
         super(LLM4Rec, self).__init__()
         self.args = args
         self.input_dim, self.output_dim = args['input_dim'], args['output_dim']
+        self.use_completion_ratio = args.get('use_completion_ratio', False)
 
         print(f'Initializing language decoder ...')
         # add the lora module
@@ -40,44 +41,33 @@ class LLM4Rec(nn.Module):
 
         # model_path = "/work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/hf_cache/hub/models--huggyllama--llama-7b/snapshots/4782ad278652c7c71b72204d462d6d01eaaf7549"
         model_path = self.args['base_model']
-        # bnb_config = BitsAndBytesConfig(
-        #     load_in_4bit=True,
-        #     bnb_4bit_compute_dtype=torch.float16,
-        #     bnb_4bit_use_double_quant=True,
-        #     bnb_4bit_quant_type="nf4",
-        # )
-        # self.llama_model = AutoModel.from_pretrained(
-        #     model_path,
-        #     quantization_config=bnb_config,
-        #     dtype=torch.float16,
-        #     cache_dir=args['cache_dir'],
-        #     device_map=self.args['device_map'],
-        # )
 
-        _dtype = torch.float32 if self.args.get('device_map') == 'cpu' else torch.float16
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,   # bfloat16, not float16 (more stable)
+        )
         self.llama_model = AutoModel.from_pretrained(
             model_path,
-            torch_dtype=_dtype,
+            quantization_config=bnb_config,
             cache_dir=args['cache_dir'] or None,
             device_map=self.args['device_map'],
         )
-        self.llama_model.enable_input_require_grads()  # needed for LoRA + grad checkpointing
-        self.llama_model = get_peft_model(self.llama_model, peft_config)
-        self.llama_model.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False}
-        )
 
-        # self.llama_model = prepare_model_for_int8_training(self.llama_model)
-        # self.llama_model = prepare_model_for_kbit_training(self.llama_model)
-        # self.llama_model = prepare_model_for_kbit_training(
-        #                         self.llama_model,
-        #                         use_gradient_checkpointing=False
-        #                     )
+        
+        # self.llama_model.enable_input_require_grads()  # needed for LoRA + grad checkpointing
         # self.llama_model = get_peft_model(self.llama_model, peft_config)
-        # self.llama_model.enable_input_require_grads()
         # self.llama_model.gradient_checkpointing_enable(
         #     gradient_checkpointing_kwargs={"use_reentrant": False}
         # )
+
+        self.llama_model = prepare_model_for_kbit_training(
+            self.llama_model,
+            use_gradient_checkpointing=True
+        )
+        self.llama_model = get_peft_model(self.llama_model, peft_config)
+        
         self.llama_model.print_trainable_parameters()
         self.llama_model.config.use_cache = False
 
@@ -112,12 +102,16 @@ class LLM4Rec(nn.Module):
             self.user_embeds = nn.Embedding.from_pretrained(self.args['user_embeds']).to(device=device, dtype=dtype)
             self.user_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device=device, dtype=dtype)
         self.input_embeds = nn.Embedding.from_pretrained(self.args['input_embeds']).to(device=device, dtype=dtype)
-        self.input_proj = nn.Linear(self.input_dim, self.llama_model.config.hidden_size).to(device=device, dtype=dtype)
+        proj_input_dim = self.input_dim + (
+            1 if self.task_type == 'sequential' and self.use_completion_ratio else 0
+        )
+        self.input_proj = nn.Linear(proj_input_dim, self.llama_model.config.hidden_size).to(device=device, dtype=dtype)
 
         self.score = nn.Linear(self.llama_model.config.hidden_size, self.output_dim, bias=False).to(device=device, dtype=dtype)
 
 
-    def predict(self, inputs, inputs_mask, history_metadata=None):
+    def predict(self, inputs, inputs_mask, history_metadata=None, completion_ratio=None):
+        self.llama_model.config.use_cache = True  
         bs = inputs.shape[0]
         device = next(self.llama_model.parameters()).device
         embed_tokens = self.llama_model.get_input_embeddings()
@@ -144,20 +138,40 @@ class LLM4Rec(nn.Module):
             items = self.input_proj(self.input_embeds(inputs[:, 1:]))
             inputs = torch.cat([users, items], dim=1)
         else:
-            inputs = self.input_proj(self.input_embeds(inputs))
+            item_embeds = self.input_embeds(inputs)
+            if self.use_completion_ratio:
+                if completion_ratio is None:
+                    completion_ratio = torch.zeros(
+                        inputs.shape,
+                        device=device,
+                        dtype=item_embeds.dtype,
+                    )
+                else:
+                    completion_ratio = completion_ratio.to(device=device, dtype=item_embeds.dtype)
+                if completion_ratio.dim() == 2:
+                    completion_ratio = completion_ratio.unsqueeze(-1)
+                item_embeds = torch.cat([item_embeds, completion_ratio], dim=-1)
+            inputs = self.input_proj(item_embeds)
         inputs = torch.cat([instruct_embeds, inputs, response_embeds], dim=1)
         attention_mask = torch.cat([instruct_mask, inputs_mask, response_mask], dim=1)
         assert attention_mask.size()[0] == inputs.size()[0] and attention_mask.size()[1] == inputs.size()[1]
 
-        outputs = self.llama_model(inputs_embeds=inputs.to(next(self.llama_model.parameters()).dtype), attention_mask=attention_mask, return_dict=True)
+        # outputs = self.llama_model(inputs_embeds=inputs.to(next(self.llama_model.parameters()).dtype), attention_mask=attention_mask, return_dict=True)
+        outputs = self.llama_model(inputs_embeds=inputs.to(torch.bfloat16), attention_mask=attention_mask, return_dict=True)
+
         pooled_output = outputs.last_hidden_state[:, -1]
         pooled_logits = self.score(pooled_output)
         # pooled_logits = self.score.to(device=pooled_output.device, dtype=pooled_output.dtype)(pooled_output)
 
         return outputs, pooled_logits.view(-1, self.output_dim)
 
-    def forward(self, inputs, inputs_mask, labels, history_metadata=None):
-        outputs, pooled_logits = self.predict(inputs, inputs_mask, history_metadata=history_metadata)
+    def forward(self, inputs, inputs_mask, labels, history_metadata=None, completion_ratio=None):
+        outputs, pooled_logits = self.predict(
+            inputs,
+            inputs_mask,
+            history_metadata=history_metadata,
+            completion_ratio=completion_ratio,
+        )
 
         loss = None
         if labels is not None:
@@ -180,7 +194,6 @@ class LLM4Rec(nn.Module):
 
     def gradient_checkpointing_disable(self):
         self.llama_model.gradient_checkpointing_disable()
-
 
 
 

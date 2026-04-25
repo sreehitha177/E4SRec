@@ -11,11 +11,14 @@ from utils.prompter import Prompter
 
 def zero_shot_evaluate(
     # base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
-    base_model: str = "/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9",
+    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B-Instruct/snapshots/5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd",
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "results",
     task_type: str = "sequential",
+    use_completion_ratio: bool = False,
+    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
+    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
     cutoff_len: int = 4096,
     lora_r: int = 16,
     lora_alpha: int = 16,
@@ -39,7 +42,13 @@ def zero_shot_evaluate(
     print(f"Using device: {device}")
     
     print("\n1. Loading dataset...")
-    dataset = SequentialDataset(data_path, 50)
+    dataset = SequentialDataset(
+        data_path,
+        50,
+        use_completion_ratio=use_completion_ratio,
+        completion_path=completion_path,
+        source_path=source_path,
+    )
     
     print(f"\n2. Loading SASRec embeddings...")
     user_embed = None
@@ -67,6 +76,7 @@ def zero_shot_evaluate(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
+        use_completion_ratio=use_completion_ratio,
     )
     model.eval()
     
@@ -93,8 +103,11 @@ def zero_shot_evaluate(
             if u not in testData or len(testData[u]) == 0:
                 continue
             
-            full_history = testData[u][0]
+            full_history, full_history_ratio, target = dataset.get_eval_record(u, subset='test')
             seq = full_history[-256:] if len(full_history) > 256 else full_history
+            seq_ratio = None
+            if full_history_ratio is not None:
+                seq_ratio = full_history_ratio[-256:] if len(full_history_ratio) > 256 else full_history_ratio
 
             selected_items = [dataset.allPos[u]]
             groundTruth = [[0]]
@@ -106,8 +119,11 @@ def zero_shot_evaluate(
             device = next(model.llama_model.parameters()).device
             inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
             inputs_mask = torch.ones(inputs.size()).to(device)
+            completion_tensor = None
+            if seq_ratio is not None:
+                completion_tensor = torch.FloatTensor(seq_ratio).to(device).unsqueeze(0)
             
-            _, ratings = model.predict(inputs, inputs_mask)
+            _, ratings = model.predict(inputs, inputs_mask, completion_ratio=completion_tensor)
             
             idx_row = torch.arange(ratings.size(0)).unsqueeze(1)
             ratings = ratings[idx_row, selected_items]

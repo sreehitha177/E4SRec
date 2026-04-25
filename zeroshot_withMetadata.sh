@@ -22,7 +22,7 @@ echo "Starting Zero-Shot Evaluation with Spotify Metadata..."
 /work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/envs/e4srec/bin/python zeroshot_withMetadata.py \
     --base_model "Qwen/Qwen2.5-7B-Instruct" \
     --data_path "datasets/sequential/LastFM/" \
-    --metadata_path "/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/shared/top_50k_full_augmented.csv" \
+    --metadata_path "/project/pi_dagarwal_umass_edu/project_7/hmagapu/top_50k_full_augmented.csv" \
     --output_dir "./results" \
     --task_type "sequential"
 

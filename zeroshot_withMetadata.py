@@ -10,7 +10,7 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28",
+    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B/snapshots/1818d35814b8319459f4bd55ed1ac8709630f003",
     data_path: str = "datasets/sequential/LastFM/",
     metadata_path: str = "/project/pi_dagarwal_umass_edu/project_7/hmagapu/top_50k_full_augmented.csv",
     cache_dir: str = "/datasets/ai/qwen2/hub",

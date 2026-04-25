@@ -1,0 +1,17 @@
+Zero-Shot Evaluation — SASRec + ENCODEC
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9
+Node path:  /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.005   0.005 0.005 0.005 0.005
+Top-5        0.005   0.025 0.010 0.010 0.014
+Top-10       0.005   0.055 0.014 0.014 0.023
+Top-20       0.005   0.100 0.017 0.017 0.034
+Top-100      0.005   0.481 0.024 0.024 0.100
+
+Detailed arrays:
+Precision: [0.005 0.005 0.005 0.005 0.005]
+Recall: [0.005 0.025 0.055 0.1   0.481]
+MRR: [0.005 0.01  0.014 0.017 0.024]
+MAP: [0.005 0.01  0.014 0.017 0.024]
+NDCG: [0.005 0.014 0.023 0.034 0.1  ]

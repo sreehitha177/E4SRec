@@ -25,6 +25,9 @@ def train(
     cache_dir: str = "",
     output_dir: str = "",
     task_type: str = "sequential",
+    use_completion_ratio: bool = False,
+    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
+    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 8,
@@ -125,7 +128,13 @@ def train(
                 f"Missing sequential item embeddings: {sasrec_embed_path}. "
                 "Generate SASRec_item_embed.pkl before finetuning."
             )
-        dataset = SequentialDataset(data_path, 50)
+        dataset = SequentialDataset(
+            data_path,
+            50,
+            use_completion_ratio=use_completion_ratio,
+            completion_path=completion_path,
+            source_path=source_path,
+        )
         user_embed, item_embed = None, pickle.load(open(sasrec_embed_path, 'rb'))
         data_collator = SequentialCollator()
         input_dim = item_embed.shape[1]
@@ -146,6 +155,7 @@ def train(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
+        use_completion_ratio=use_completion_ratio,
     )
 
     if not ddp and torch.cuda.device_count() > 1:
@@ -213,14 +223,21 @@ def train(
             ratings[exclude_index, exclude_items] = -(1 << 10)
 
         elif task_type == 'sequential':
-            if len(testData[u]) == 0:
+            seq, completion_ratio, target = dataset.get_eval_record(u, subset='test')
+            if len(seq) == 0:
                 continue
-            selected_items = [[testData[u][1]] + dataset.allPos[u]]
+            seq = seq[-dataset.maxlen:]
+            if completion_ratio is not None:
+                completion_ratio = completion_ratio[-dataset.maxlen:]
+            selected_items = [[target] + dataset.allPos[u]]
             groundTruth = [[0]]
             device = next(model.llama_model.parameters()).device
-            inputs = torch.LongTensor(testData[u][0]).to(device).unsqueeze(0)
+            inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
             inputs_mask = torch.ones(inputs.shape, device=device)
-            _, ratings = model.predict(inputs, inputs_mask)
+            completion_tensor = None
+            if completion_ratio is not None:
+                completion_tensor = torch.FloatTensor(completion_ratio).to(device).unsqueeze(0)
+            _, ratings = model.predict(inputs, inputs_mask, completion_ratio=completion_tensor)
             ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
 
         _, ratings_K = torch.topk(ratings, k=topk[-1])

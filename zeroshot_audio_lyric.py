@@ -1,11 +1,14 @@
 import os
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 from typing import List, Optional
 import fire
 import pickle
 from concurrent.futures import ThreadPoolExecutor
+from transformers import AutoConfig
 from model import LLM4Rec
 from utils.data_utils import SequentialDataset
 from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, getLabel
@@ -81,25 +84,100 @@ def load_node_embeddings(
     return aligned
 
 
+def _project_to_dim(embed: torch.Tensor, target_dim: int, seed_offset: int = 0) -> torch.Tensor:
+    """Project an embedding to target_dim using a deterministic random linear layer.
+ 
+    The projection is seeded so results are reproducible across runs. In a
+    fine-tuning setup you would replace this with a trained nn.Linear that is
+    jointly optimised with the rest of the model.
+    """
+    src_dim = embed.shape[1]
+    if src_dim == target_dim:
+        return embed
+ 
+    # Deterministic seed per modality so each gets a distinct projection matrix.
+    gen = torch.Generator()
+    gen.manual_seed(42 + seed_offset)
+ 
+    proj = nn.Linear(src_dim, target_dim, bias=False)
+    nn.init.kaiming_uniform_(proj.weight, generator=gen)  # He init, common for projections
+    proj.eval()
+ 
+    with torch.no_grad():
+        projected = proj(embed)
+ 
+    print(f"   Projected {src_dim} → {target_dim} (seed_offset={seed_offset})")
+    return projected
+
+
 def fuse_item_embeddings(
     sasrec_embed: torch.Tensor,
     audio_embed: Optional[torch.Tensor] = None,
     lyric_embed: Optional[torch.Tensor] = None,
     strategy: str = 'concat',
+    target_dim: Optional[int] = None,
+    weights: Optional[List[float]] = None,
 ) -> torch.Tensor:
     """Fuse SASRec, audio, and lyric embeddings.
 
     Current default: concatenation, matching existing separate zeroshot scripts.
-    Later strategies can be added here without changing the evaluation logic.
-    """
-    embeds = [sasrec_embed]
-    if audio_embed is not None:
-        embeds.append(audio_embed)
-    if lyric_embed is not None:
-        embeds.append(lyric_embed)
 
+    weighted_sum — project every modality to `target_dim` (defaults to the
+                 SASRec embedding dim), L2-normalise each one, then compute a
+                 weighted sum. `weights` is an optional list of non-negative
+                 scalars in the order [sasrec, audio, lyric] (missing modalities
+                 are skipped). Weights are automatically normalised to sum to 1,
+                 so you can pass raw importance values like [2, 1, 1].
+    """
+    embeds_raw = [sasrec_embed]
+    if audio_embed is not None:
+        embeds_raw.append(audio_embed)
+    if lyric_embed is not None:
+        embeds_raw.append(lyric_embed)
+
+    modality_names = ['sasrec']
+    if audio_embed is not None:
+        modality_names.append('audio')
+    if lyric_embed is not None:
+        modality_names.append('lyric')
+        
     if strategy == 'concat':
-        fused = torch.cat(embeds, dim=-1)
+        fused = torch.cat(embeds_raw, dim=-1)
+    elif strategy == 'weighted_sum':
+        out_dim = target_dim or sasrec_embed.shape[1]
+        print(f"\n   [weighted_sum] target_dim={out_dim}")
+ 
+        # 1. Project every modality to target_dim (no-op if already correct).
+        projected = [
+            _project_to_dim(emb, out_dim, seed_offset=i)
+            for i, emb in enumerate(embeds_raw)
+        ]
+ 
+        # 2. L2-normalise each modality so weights control contribution cleanly.
+        normalised = [F.normalize(e, p=2, dim=-1) for e in projected]
+ 
+        # 3. Resolve and validate weights.
+        n = len(normalised)
+        if weights is None:
+            w = [1.0 / n] * n
+            print(f"   No weights supplied — using equal weights: {w}")
+        else:
+            if len(weights) != n:
+                raise ValueError(
+                    f"Expected {n} weights (one per active modality: "
+                    f"{modality_names}), got {len(weights)}: {weights}"
+                )
+            total = sum(weights)
+            if total <= 0:
+                raise ValueError(f"Weights must be positive, got {weights}")
+            w = [wi / total for wi in weights]
+ 
+        print(f"   Modalities : {modality_names}")
+        print(f"   Raw weights: {weights}")
+        print(f"   Normalised : {[round(wi, 4) for wi in w]}")
+ 
+        # 4. Weighted sum.
+        fused = sum(wi * e for wi, e in zip(w, normalised))
     else:
         raise ValueError(f"Unsupported fusion strategy: {strategy}")
 
@@ -107,41 +185,16 @@ def fuse_item_embeddings(
     return fused
 
 
-def build_metadata_lookup(data_path: str, metadata_path: str):
-    master_map = pd.read_csv(os.path.join(data_path, 'item_id_master_map.csv'))
-    full_meta = pd.read_csv(metadata_path)
-
-    full_meta['_key'] = full_meta['artist_name'].str.lower().str.strip() + '||' + full_meta['track_name'].str.lower().str.strip()
-    master_map['_key'] = master_map['artist_name'].str.lower().str.strip() + '||' + master_map['track_name'].str.lower().str.strip()
-
-    merged_meta = full_meta.merge(master_map[['item_id', '_key']], on='_key', how='inner').drop_duplicates(subset=['_key'])
-    print(f"   Metadata file: {len(full_meta)} rows | master items: {len(master_map)} | matched: {len(merged_meta)}")
-
-    name_lookup = {
-        row['item_id']: f"'{row['track_name']}' by {row['artist_name']}"
-        for _, row in master_map.iterrows()
-        if pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name'))
-    }
-
-    def _fmt(val, suffix=''):
-        return f"{val}{suffix}" if pd.notna(val) and str(val).strip() not in ('', 'nan') else None
-
-    meta_lookup = {}
-    for _, row in merged_meta.iterrows():
-        parts = []
-        if _fmt(row.get('genre')): parts.append(f"genre: {row['genre']}")
-        if _fmt(row.get('year')):  parts.append(f"year: {int(row['year'])}")
-        if _fmt(row.get('tags')):  parts.append(f"tags: {row['tags']}")
-        if _fmt(row.get('tempo')): parts.append(f"tempo: {row['tempo']:.0f} bpm")
-        if _fmt(row.get('valence')): parts.append(f"valence: {row['valence']:.2f}")
-        if _fmt(row.get('energy')): parts.append(f"energy: {row['energy']:.2f}")
-        meta_str = ' | '.join(parts)
-        desc = f"'{row['track_name']}' by {row['artist_name']}"
-        if meta_str:
-            desc += f" [{meta_str}]"
-        meta_lookup[row['item_id']] = desc
-
-    return meta_lookup, name_lookup
+def build_name_lookup(mapping_path: str):
+    """Creates a simple ID -> 'Track by Artist' mapping."""
+    master_map = pd.read_csv(mapping_path)
+    name_lookup = {}
+    for _, row in master_map.iterrows():
+        item_id = row['item_id']
+        track = row.get('track_name', 'Unknown Track')
+        artist = row.get('artist_name', 'Unknown Artist')
+        name_lookup[item_id] = f"'{track}' by {artist}"
+    return name_lookup
 
 
 def zero_shot_evaluate(
@@ -149,12 +202,16 @@ def zero_shot_evaluate(
     data_path: str = "datasets/sequential/LastFM/",
     audio_node_path: str = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3",
     lyric_node_path: str = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7",
-    metadata_path: str = "",
     mapping_path: str = "datasets/sequential/LastFM/item_id_master_map.csv",
     cache_dir: str = "",
     output_dir: str = "results",
     task_type: str = "sequential",
+    use_completion_ratio: bool = False,
+    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
+    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
     fusion_strategy: str = "concat",
+    fusion_weights: str = "",
+    fusion_target_dim: int = 0,     # 0 → defaults to SASRec dim
     lora_r: int = 16,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -169,11 +226,32 @@ def zero_shot_evaluate(
     print(f"  Dataset:          {data_path}")
     print(f"  Audio node path:  {audio_node_path}")
     print(f"  Lyric node path:  {lyric_node_path}")
-    print(f"  Metadata path:    {metadata_path}")
     print(f"  Fusion strategy:  {fusion_strategy}")
+    print(f"  Fusion weights:   {fusion_weights or 'equal (default)'}")
+    print(f"  Fusion target dim:{fusion_target_dim or 'SASRec dim (default)'}")
+
+    parsed_weights: Optional[List[float]] = None
+    
+    if isinstance(fusion_weights, (list, tuple)):
+        if len(fusion_weights) > 0:
+            parsed_weights = [float(x) for x in fusion_weights]
+    elif isinstance(fusion_weights, str) and fusion_weights.strip():
+        try:
+            parsed_weights = [float(x) for x in fusion_weights.split(',')]
+        except ValueError:
+            raise ValueError(
+                f"--fusion_weights must be a comma-separated list of floats, "
+                f"e.g. '0.5,0.3,0.2'. Got: '{fusion_weights}'"
+            )
 
     print("\n1. Loading dataset...")
-    dataset = SequentialDataset(data_path, 50)
+    dataset = SequentialDataset(
+        data_path,
+        50,
+        use_completion_ratio=use_completion_ratio,
+        completion_path=completion_path,
+        source_path=source_path,
+    )
 
     print("\n2. Loading SASRec embeddings...")
     sasrec_embed = load_sasrec_embeddings(data_path)
@@ -182,10 +260,24 @@ def zero_shot_evaluate(
     audio_embed = load_node_embeddings(audio_node_path, mapping_path, sasrec_embed, "audio")
     lyric_embed = load_node_embeddings(lyric_node_path, mapping_path, sasrec_embed, "lyric")
 
-    item_embed = fuse_item_embeddings(sasrec_embed, audio_embed=audio_embed, lyric_embed=lyric_embed, strategy=fusion_strategy)
+    # item_embed = fuse_item_embeddings(sasrec_embed, audio_embed=audio_embed, lyric_embed=lyric_embed, strategy=fusion_strategy)
 
-    print("\n3. Building metadata lookup table...")
-    meta_lookup, name_lookup = build_metadata_lookup(data_path, metadata_path)
+    print("\n3. Fusing embeddings...")
+    fusion_dim = fusion_target_dim if fusion_target_dim > 0 else None
+    if fusion_strategy == 'weighted_sum' and fusion_dim is None:
+        cfg = AutoConfig.from_pretrained(base_model, cache_dir=cache_dir or None)
+        fusion_dim = cfg.hidden_size
+        print(f"   Auto-detected LLM hidden_size as projection target: {fusion_dim}")
+    item_embed = fuse_item_embeddings(
+        sasrec_embed,
+        audio_embed=audio_embed,
+        lyric_embed=lyric_embed,
+        strategy=fusion_strategy,
+        target_dim=fusion_dim,
+        weights=parsed_weights,
+    )
+
+    name_lookup = build_name_lookup(mapping_path)
 
     print(f"\n4. Loading base model: {base_model}")
     prompter = Prompter(prompt_template_name)
@@ -203,6 +295,7 @@ def zero_shot_evaluate(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=None,
         input_embeds=item_embed,
+        use_completion_ratio=use_completion_ratio,
     )
     model.eval()
 
@@ -222,23 +315,37 @@ def zero_shot_evaluate(
             if u not in testData or len(testData[u]) == 0:
                 continue
 
-            full_history = testData[u][0]
+            full_history, full_history_ratio, target = dataset.get_eval_record(u, subset='test')
             seq = full_history[-256:] if len(full_history) > 256 else full_history
+            seq_ratio = None
+            if full_history_ratio is not None:
+                seq_ratio = full_history_ratio[-256:] if len(full_history_ratio) > 256 else full_history_ratio
             selected_items = [dataset.allPos[u]]
             groundTruth = [[0]]
 
             recent_history = full_history[-10:] if len(full_history) > 10 else full_history
             history_lines = []
             for i, item_id in enumerate(recent_history):
-                desc = meta_lookup.get(item_id, name_lookup.get(item_id, "Unknown Track"))
-                history_lines.append(f"{i+1}. {desc}")
+                # desc = meta_lookup.get(item_id, name_lookup.get(item_id, "Unknown Track"))
+                # history_lines.append(f"{i+1}. {desc}")
+                name_desc = name_lookup.get(item_id, f"Item {item_id}")
+                history_lines.append(f"{i+1}. {name_desc}")
+
             prompt_texts = prompter.generate_prompt(task_type, "\n".join(history_lines))
 
             device = next(model.llama_model.parameters()).device
             inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
             inputs_mask = torch.ones(inputs.size()).to(device)
+            completion_tensor = None
+            if seq_ratio is not None:
+                completion_tensor = torch.FloatTensor(seq_ratio).to(device).unsqueeze(0)
 
-            _, ratings = model.predict(inputs, inputs_mask, history_metadata=[prompt_texts[0]])
+            _, ratings = model.predict(
+                inputs,
+                inputs_mask,
+                history_metadata=[prompt_texts[0]],
+                completion_ratio=completion_tensor,
+            )
             idx_row = torch.arange(ratings.size(0)).unsqueeze(1)
             ratings = ratings[idx_row, selected_items]
 
@@ -268,7 +375,11 @@ def zero_shot_evaluate(
     np.set_printoptions(precision=3, suppress=True)
     print("\n" + df_results.to_string(float_format=lambda x: f"{x:.3f}"))
 
-    safe_model_name = f"SASRec_audio_lyric_metadata_{fusion_strategy}"
+    if parsed_weights:
+        weight_tag = '-'.join(str(w) for w in parsed_weights)
+    else:
+        weight_tag = "equal"
+    safe_model_name = f"SASRec_audio_lyric_{fusion_strategy}_{weight_tag}"
     output_file = os.path.join(output_dir, f"zeroshot_{safe_model_name}.txt")
     with open(output_file, 'w') as f:
         f.write(f"Zero-Shot Evaluation — {safe_model_name}\n")
@@ -276,8 +387,9 @@ def zero_shot_evaluate(
         f.write(f"Dataset: {data_path}\n")
         f.write(f"Audio node path: {audio_node_path}\n")
         f.write(f"Lyric node path: {lyric_node_path}\n")
-        f.write(f"Metadata path: {metadata_path}\n")
         f.write(f"Fusion strategy: {fusion_strategy}\n\n")
+        f.write(f"Fusion weights:   {fusion_weights or 'equal'}\n")
+        f.write(f"Fusion target dim:{fusion_target_dim or 'SASRec dim'}\n\n")
         f.write(df_results.to_string(float_format=lambda x: f"{x:.3f}"))
         f.write("\n\nDetailed arrays:\n")
         for key in results:
