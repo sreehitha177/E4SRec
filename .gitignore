@@ -149,3 +149,11 @@ CACHEDIR.TAG
 # Large raw data files
 userid-timestamp-artid-artname-traid-traname.tsv
 data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv
+
+.claude/
+.codex
+
+logs/
+
+metadata/vocal/logs/
+instruments/vocal/logs/
