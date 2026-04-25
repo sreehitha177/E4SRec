@@ -85,22 +85,42 @@ class SequentialDataset(Dataset):
         val_split = _read_split_file(self.dataset + "val.txt")
         test_sample_split = _read_split_file(self.dataset + "test_sample.txt")
 
-        self.allPos = {}
+        # Build a compact item remapping: raw item id -> contiguous index [0, n_unique).
+        # Without this, m_item = max_raw_id+1 (~383k for LastFM) which makes the
+        # score head and embedding table enormous even though only ~3k unique items exist.
+        all_raw_ids = set()
         all_users = sorted(set(train_split.keys()) | set(test_split.keys()))
         for user in all_users:
-            train_items = train_split.get(user, [])
-            test_items = test_split.get(user, [])
+            for item in train_split.get(user, []):
+                all_raw_ids.add(item)
+            for item in test_split.get(user, []):
+                all_raw_ids.add(item)
+            for item in val_split.get(user, []):
+                all_raw_ids.add(item)
+            for item in test_sample_split.get(user, []):
+                all_raw_ids.add(item)
+        # index 0 is reserved as the padding/unknown token
+        self.item_map = {raw: idx + 1 for idx, raw in enumerate(sorted(all_raw_ids))}
+
+        def remap(items):
+            return [self.item_map[i] for i in items if i in self.item_map]
+
+        self.allPos = {}
+        for user in all_users:
+            train_items = remap(train_split.get(user, []))
+            test_items  = remap(test_split.get(user, []))
             if len(train_items) < 1 or len(test_items) < 1:
                 continue
 
-            sample_items = test_sample_split.get(user)
-            if sample_items is None or len(sample_items) < 1:
+            sample_items = remap(test_sample_split.get(user, []))
+            if not sample_items:
                 sample_items = [test_items[0]]
             self.allPos[user] = sample_items
 
             self.testData[user] = [train_items, test_items[0]]
-            if user in val_split and len(val_split[user]) > 0:
-                self.valData[user] = [train_items, val_split[user][0]]
+            val_items = remap(val_split.get(user, []))
+            if val_items:
+                self.valData[user] = [train_items, val_items[0]]
             else:
                 self.valData[user] = []
 
@@ -109,15 +129,9 @@ class SequentialDataset(Dataset):
                 self.trainData.append([train_items[:-length + t], train_items[-length + t]])
 
             self.n_user = max(self.n_user, user)
-            local_max = max(
-                max(train_items),
-                max(test_items),
-                max(self.allPos[user]),
-                max(val_split[user]) if user in val_split and len(val_split[user]) > 0 else 0,
-            )
-            self.m_item = max(self.m_item, local_max)
 
-        self.n_user, self.m_item = self.n_user + 1, self.m_item + 1
+        self.n_user  = self.n_user + 1
+        self.m_item  = len(self.item_map) + 1  # +1 for the padding index 0
 
     def get_user_pos_items(self, users):
         posItems = []
@@ -134,11 +148,15 @@ class SequentialDataset(Dataset):
 
 @dataclass
 class SequentialCollator:
+    max_len: int = 50  # matches SequentialDataset maxlen; keeps item tokens ≤ this
+
     def __call__(self, batch) -> dict:
         seqs, labels = zip(*batch)
-        max_len = max(max([len(seq) for seq in seqs]), 2)
-        inputs = [[0] * (max_len - len(seq)) + seq for seq in seqs]
-        inputs_mask = [[0] * (max_len - len(seq)) + [1] * len(seq) for seq in seqs]
+        # Truncate each sequence to the most recent max_len items (right-aligned).
+        seqs = [seq[-self.max_len:] if len(seq) > self.max_len else seq for seq in seqs]
+        pad_len = max(max(len(seq) for seq in seqs), 2)
+        inputs = [[0] * (pad_len - len(seq)) + seq for seq in seqs]
+        inputs_mask = [[0] * (pad_len - len(seq)) + [1] * len(seq) for seq in seqs]
         labels = [[label] for label in labels]
         inputs, inputs_mask, labels = torch.LongTensor(inputs), torch.LongTensor(inputs_mask), torch.LongTensor(labels)
 

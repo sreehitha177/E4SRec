@@ -5,21 +5,23 @@
 #SBATCH --mem=4G
 #SBATCH --time=05:00:00
 #SBATCH --array=0-15
-#SBATCH --output=/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/vocal/logs/vocal_annot_%A_%a.out
-#SBATCH --error=/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/vocal/logs/vocal_annot_%A_%a.err
+#SBATCH --output=/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec/metadata/vocal/logs/vocal_annot_%A_%a.out
+#SBATCH --error=/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec/metadata/vocal/logs/vocal_annot_%A_%a.err
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@120
 
-set -euo pipefail
 
-BASE_DIR=/work/pi_dagarwal_umass_edu/project_7/hmagapu
+BASE_DIR=/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec
 METADATA_DIR="${BASE_DIR}/metadata"
 VOCAL_DIR="${METADATA_DIR}/vocal"
 
 mkdir -p "${VOCAL_DIR}/logs"
 
+module load conda/latest
 eval "$(conda shell.bash hook)"
-conda activate dolby
+conda activate 698ds
+
+set -euo pipefail
 
 set -a
 source "${METADATA_DIR}/.env"
