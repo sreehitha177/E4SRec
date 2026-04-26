@@ -8,7 +8,6 @@ from typing import List, Optional
 import fire
 import pickle
 from concurrent.futures import ThreadPoolExecutor
-from transformers import AutoConfig
 from model import LLM4Rec
 from utils.data_utils import SequentialDataset
 from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, getLabel
@@ -144,7 +143,7 @@ def fuse_item_embeddings(
     if strategy == 'concat':
         fused = torch.cat(embeds_raw, dim=-1)
     elif strategy == 'weighted_sum':
-        out_dim = target_dim or sasrec_embed.shape[1]
+        out_dim = target_dim or max(e.shape[1] for e in embeds_raw)
         print(f"\n   [weighted_sum] target_dim={out_dim}")
  
         # 1. Project every modality to target_dim (no-op if already correct).
@@ -263,17 +262,12 @@ def zero_shot_evaluate(
     # item_embed = fuse_item_embeddings(sasrec_embed, audio_embed=audio_embed, lyric_embed=lyric_embed, strategy=fusion_strategy)
 
     print("\n3. Fusing embeddings...")
-    fusion_dim = fusion_target_dim if fusion_target_dim > 0 else None
-    if fusion_strategy == 'weighted_sum' and fusion_dim is None:
-        cfg = AutoConfig.from_pretrained(base_model, cache_dir=cache_dir or None)
-        fusion_dim = cfg.hidden_size
-        print(f"   Auto-detected LLM hidden_size as projection target: {fusion_dim}")
     item_embed = fuse_item_embeddings(
         sasrec_embed,
         audio_embed=audio_embed,
         lyric_embed=lyric_embed,
         strategy=fusion_strategy,
-        target_dim=fusion_dim,
+        target_dim=fusion_target_dim if fusion_target_dim > 0 else None,
         weights=parsed_weights,
     )
 
@@ -375,11 +369,18 @@ def zero_shot_evaluate(
     np.set_printoptions(precision=3, suppress=True)
     print("\n" + df_results.to_string(float_format=lambda x: f"{x:.3f}"))
 
-    if parsed_weights:
-        weight_tag = '-'.join(str(w) for w in parsed_weights)
+    modality_parts = ['SASRec']
+    if audio_embed is not None:
+        modality_parts.append('audio')
+    if lyric_embed is not None:
+        modality_parts.append('lyric')
+    modality_tag = '_'.join(modality_parts)
+
+    if fusion_strategy == 'weighted_sum':
+        weight_tag = '-'.join(str(w) for w in parsed_weights) if parsed_weights else "equal"
+        safe_model_name = f"{modality_tag}_weighted_sum_{weight_tag}"
     else:
-        weight_tag = "equal"
-    safe_model_name = f"SASRec_audio_lyric_{fusion_strategy}_{weight_tag}"
+        safe_model_name = f"{modality_tag}_concat"
     output_file = os.path.join(output_dir, f"zeroshot_{safe_model_name}.txt")
     with open(output_file, 'w') as f:
         f.write(f"Zero-Shot Evaluation — {safe_model_name}\n")

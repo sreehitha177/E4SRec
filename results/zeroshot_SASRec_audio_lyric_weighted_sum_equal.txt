@@ -1,0 +1,23 @@
+Zero-Shot Evaluation — SASRec_audio_lyric_weighted_sum_equal
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Dataset: datasets/sequential/LastFM/
+Audio node path: 
+Lyric node path: /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7
+Fusion strategy: weighted_sum
+
+Fusion weights:   equal
+Fusion target dim:SASRec dim
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.003   0.003 0.003 0.003 0.003
+Top-5        0.005   0.025 0.010 0.010 0.014
+Top-10       0.006   0.058 0.015 0.015 0.025
+Top-20       0.006   0.125 0.019 0.019 0.042
+Top-100      0.005   0.489 0.027 0.027 0.105
+
+Detailed arrays:
+Precision: [0.003 0.005 0.006 0.006 0.005]
+Recall: [0.003 0.025 0.058 0.125 0.489]
+MRR: [0.003 0.01  0.015 0.019 0.027]
+MAP: [0.003 0.01  0.015 0.019 0.027]
+NDCG: [0.003 0.014 0.025 0.042 0.105]
