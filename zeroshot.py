@@ -10,15 +10,12 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    # base_model: str = "Qwen/Qwen2.5-7B-Instruct", 
+    # base_model: str = "Qwen/Qwen2.5-7B-Instruct",
     base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B-Instruct/snapshots/5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd",
     data_path: str = "datasets/sequential/LastFM/",
     cache_dir: str = "",
     output_dir: str = "results",
     task_type: str = "sequential",
-    use_completion_ratio: bool = False,
-    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
-    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
     cutoff_len: int = 4096,
     lora_r: int = 16,
     lora_alpha: int = 16,
@@ -42,22 +39,23 @@ def zero_shot_evaluate(
     print(f"Using device: {device}")
     
     print("\n1. Loading dataset...")
-    dataset = SequentialDataset(
-        data_path,
-        50,
-        use_completion_ratio=use_completion_ratio,
-        completion_path=completion_path,
-        source_path=source_path,
-    )
-    
+    dataset = SequentialDataset(data_path, 50)
+
     print(f"\n2. Loading SASRec embeddings...")
     user_embed = None
-    
-    # checkpoint = torch.load(data_path + 'SASRec.pth', map_location='cpu', weights_only=False)
-    # item_embed = checkpoint.get('model', checkpoint)['embedding.weight']
     import pickle
-    item_embed = pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
-    print(f"   Loaded SASRec embeddings with shape: {item_embed.shape}")
+    raw_embed = pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
+    if not isinstance(raw_embed, torch.Tensor):
+        raw_embed = torch.tensor(raw_embed)
+    raw_embed = raw_embed.float().cpu()
+    print(f"   Raw SASRec shape: {raw_embed.shape}")
+    input_dim = raw_embed.shape[1]
+    n_items = len(dataset.item_map) + 1
+    item_embed = torch.zeros(n_items, input_dim)
+    for raw_id, new_idx in dataset.item_map.items():
+        if raw_id < raw_embed.shape[0]:
+            item_embed[new_idx] = raw_embed[raw_id]
+    print(f"   Remapped embeddings: {item_embed.shape}")
     
     print(f"\n3. Loading base model: {base_model}")
     prompter = Prompter(prompt_template_name)
@@ -76,7 +74,6 @@ def zero_shot_evaluate(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
-        use_completion_ratio=use_completion_ratio,
     )
     model.eval()
     
@@ -103,27 +100,17 @@ def zero_shot_evaluate(
             if u not in testData or len(testData[u]) == 0:
                 continue
             
-            full_history, full_history_ratio, target = dataset.get_eval_record(u, subset='test')
+            full_history = testData[u][0]
             seq = full_history[-256:] if len(full_history) > 256 else full_history
-            seq_ratio = None
-            if full_history_ratio is not None:
-                seq_ratio = full_history_ratio[-256:] if len(full_history_ratio) > 256 else full_history_ratio
 
             selected_items = [dataset.allPos[u]]
             groundTruth = [[0]]
-            
-            # inputs = torch.LongTensor(seq).to(model.llama_model.device).unsqueeze(0)
-            # inputs_mask = torch.ones(inputs.shape).to(model.llama_model.device)
 
-            # Get the device of the model (first shard)
             device = next(model.llama_model.parameters()).device
             inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
             inputs_mask = torch.ones(inputs.size()).to(device)
-            completion_tensor = None
-            if seq_ratio is not None:
-                completion_tensor = torch.FloatTensor(seq_ratio).to(device).unsqueeze(0)
-            
-            _, ratings = model.predict(inputs, inputs_mask, completion_ratio=completion_tensor)
+
+            _, ratings = model.predict(inputs, inputs_mask)
             
             idx_row = torch.arange(ratings.size(0)).unsqueeze(1)
             ratings = ratings[idx_row, selected_items]

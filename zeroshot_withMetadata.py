@@ -10,9 +10,9 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B/snapshots/1818d35814b8319459f4bd55ed1ac8709630f003",
+    base_model: str = "Qwen/Qwen2.5-32B-Instruct",
     data_path: str = "datasets/sequential/LastFM/",
-    metadata_path: str = "/project/pi_dagarwal_umass_edu/project_7/hmagapu/top_50k_full_augmented.csv",
+    metadata_path: str = "/work/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/shared/top_50k_full_augmented.csv",
     cache_dir: str = "/datasets/ai/qwen2/hub",
     output_dir: str = "results",
     task_type: str = "sequential",
@@ -38,15 +38,24 @@ def zero_shot_evaluate(
     print(f"\nLoading SASRec embeddings...")
     user_embed = None
     import pickle
-    item_embed = pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
-    print(f"   Loaded SASRec embeddings with shape: {item_embed.shape}")
+    raw_embed = pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb'))
+    if not isinstance(raw_embed, torch.Tensor):
+        raw_embed = torch.tensor(raw_embed)
+    raw_embed = raw_embed.float().cpu()
+    print(f"   Raw SASRec shape: {raw_embed.shape}")
+    item_map = dataset.item_map
+    n_items = len(item_map) + 1
+    item_embed = torch.zeros(n_items, raw_embed.shape[1])
+    for raw_id, new_idx in item_map.items():
+        if raw_id < raw_embed.shape[0]:
+            item_embed[new_idx] = raw_embed[raw_id]
+    print(f"   Remapped embeddings: {item_embed.shape}")
 
-    
     print("Building Metadata Lookup Table...")
     master_map = pd.read_csv(os.path.join(data_path, "item_id_master_map.csv"))
     full_meta = pd.read_csv(metadata_path)
 
-    # Join on normalised artist + track name 
+    # Join on normalised artist + track name
     full_meta['_key'] = full_meta['artist_name'].str.lower().str.strip() + '||' + \
                         full_meta['track_name'].str.lower().str.strip()
     master_map['_key'] = master_map['artist_name'].str.lower().str.strip() + '||' + \
@@ -56,19 +65,22 @@ def zero_shot_evaluate(
                             .drop_duplicates(subset=['_key'])
     print(f"   Metadata file: {len(full_meta)} rows | master items: {len(master_map)} | matched: {len(merged_meta)}")
 
-    # Fallback lookup: { item_id -> "'track' by artist" } for items without full metadata
-    name_lookup = {
-        row['item_id']: f"'{row['track_name']}' by {row['artist_name']}"
-        for _, row in master_map.iterrows()
-        if pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name'))
-    }
-
-    # Build lookup: { item_id -> description string }
+    # Build lookups keyed by remapped new_idx so they match the sequences from dataset.
     def _fmt(val, suffix=''):
         return f"{val}{suffix}" if pd.notna(val) and str(val).strip() not in ('', 'nan') else None
 
+    name_lookup = {}
+    for _, row in master_map.iterrows():
+        if pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name')):
+            new_idx = item_map.get(int(row['item_id']), None)
+            if new_idx is not None:
+                name_lookup[new_idx] = f"'{row['track_name']}' by {row['artist_name']}"
+
     meta_lookup = {}
     for _, row in merged_meta.iterrows():
+        new_idx = item_map.get(int(row['item_id']), None)
+        if new_idx is None:
+            continue
         parts = []
         if _fmt(row.get('genre')): parts.append(f"genre: {row['genre']}")
         if _fmt(row.get('year')):  parts.append(f"year: {int(row['year'])}")
@@ -80,7 +92,7 @@ def zero_shot_evaluate(
         desc = f"'{row['track_name']}' by {row['artist_name']}"
         if meta_str:
             desc += f" [{meta_str}]"
-        meta_lookup[row['item_id']] = desc
+        meta_lookup[new_idx] = desc
 
     print(f"\nLoading base model: {base_model}")
     prompter = Prompter(prompt_template_name)

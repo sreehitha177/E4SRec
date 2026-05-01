@@ -22,9 +22,6 @@ def train(
     checkpoint_dir: str = "",
     output_dir: str = "",
     task_type: str = "",
-    use_completion_ratio: bool = False,
-    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
-    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 8,
@@ -116,16 +113,9 @@ def train(
         item_embed = torch.cat([item_embed.mean(dim=0).unsqueeze(0), item_embed], dim=0)
         data_collator = BipartiteGraphCollator()
     elif task_type == 'sequential':
-        dataset = SequentialDataset(
-            data_path,
-            50,
-            use_completion_ratio=use_completion_ratio,
-            completion_path=completion_path,
-            source_path=source_path,
-        )
+        dataset = SequentialDataset(data_path, 50)
         user_embed, item_embed = None, pickle.load(open(data_path + 'SASRec_item_embed.pkl', 'rb')).cuda()
         data_collator = SequentialCollator()
-        input_dim = item_embed.shape[1]
     
     state_dict = torch.load(checkpoint_dir + 'pytorch_model.bin', map_location='cpu')
     state_dict = {k: v.cuda() for k, v in state_dict.items() if 'lora' in k or 'user_proj' in k or 'input_proj' in k or 'score' in k}
@@ -134,7 +124,7 @@ def train(
         base_model=base_model,
         task_type=task_type,
         cache_dir=cache_dir,
-        input_dim=input_dim,
+        input_dim=64,
         output_dim=dataset.m_item,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
@@ -144,7 +134,6 @@ def train(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
-        use_completion_ratio=use_completion_ratio,
     )
     model.load_state_dict(state_dict, strict=False)
     del state_dict
@@ -212,20 +201,13 @@ def train(
             ratings[exclude_index, exclude_items] = -(1 << 10)
 
         elif task_type == 'sequential':
-            seq, completion_ratio, target = dataset.get_eval_record(u, subset='test')
-            if len(seq) == 0:
+            if len(testData[u]) == 0:
                 continue
-            seq = seq[-dataset.maxlen:]
-            if completion_ratio is not None:
-                completion_ratio = completion_ratio[-dataset.maxlen:]
-            all_pos = [seq]
-            groundTruth = [[target]]
-            inputs = torch.LongTensor(seq).cuda().unsqueeze(0)
+            all_pos = [testData[u][0]]
+            groundTruth = [[testData[u][1]]]
+            inputs = torch.LongTensor(testData[u][0]).cuda().unsqueeze(0)
             inputs_mask = torch.ones(inputs.shape).cuda()
-            completion_tensor = None
-            if completion_ratio is not None:
-                completion_tensor = torch.FloatTensor(completion_ratio).cuda().unsqueeze(0)
-            _, ratings = model.predict(inputs, inputs_mask, completion_ratio=completion_tensor)
+            _, ratings = model.predict(inputs, inputs_mask)
             exclude_index = []
             exclude_items = []
             for range_i, its in enumerate(all_pos):

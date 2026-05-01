@@ -12,7 +12,7 @@ from utils.eval_utils import RecallPrecision_atK, MRR_atK, MAP_atK, NDCG_atK, ge
 from utils.prompter import Prompter
 
 def zero_shot_evaluate(
-    base_model: str = "/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9",
+    base_model: str = "Qwen/Qwen2.5-7B-Instruct",
     data_path: str = "datasets/sequential/LastFM/",
     # Path to the node directory (e.g. .../audio_embeddings/node_0 or .../lyrics_embeddings/node_5)
     node_path: str = "",
@@ -54,8 +54,18 @@ def zero_shot_evaluate(
         sasrec_embed = torch.from_numpy(raw_sasrec).float()
     else:
         sasrec_embed = torch.tensor(raw_sasrec).float()
-    sasrec_embed = sasrec_embed.cpu()   # ensure CPU before cat with aligned zeros
-    print(f"   SASRec shape: {sasrec_embed.shape}")
+    sasrec_embed = sasrec_embed.cpu()
+    print(f"   Raw SASRec shape: {sasrec_embed.shape}")
+
+    # Remap raw embeddings to match dataset's contiguous item indices.
+    item_map = dataset.item_map
+    n_items = len(item_map) + 1
+    sasrec_dim = sasrec_embed.shape[1]
+    sasrec_remapped = torch.zeros(n_items, sasrec_dim)
+    for raw_id, new_idx in item_map.items():
+        if raw_id < sasrec_embed.shape[0]:
+            sasrec_remapped[new_idx] = sasrec_embed[raw_id]
+    print(f"   Remapped SASRec shape: {sasrec_remapped.shape}")
 
     # ------------------------------------------------------------------ #
     # 3. Load and align external embeddings (audio or lyrics)
@@ -73,7 +83,7 @@ def zero_shot_evaluate(
 
         merged = (
             emb_csv.merge(master[['item_id', '_key']], on='_key', how='inner')
-                   .drop_duplicates(subset=['track_index'])   # 1 item_id per file
+                   .drop_duplicates(subset=['track_index'])
         )
         print(f"   {model_name} files: {len(emb_csv)} | master items: {len(master)} | matched: {len(merged)}")
 
@@ -84,16 +94,15 @@ def zero_shot_evaluate(
         emb_dim = sample_tensor.shape[0]
         print(f"   Embedding dim: {emb_dim}")
 
-        n_items = sasrec_embed.shape[0]
         aligned = torch.zeros(n_items, emb_dim)
 
         # -- parallel load with ThreadPoolExecutor --
         def _load_one(row):
             pt_path = os.path.join(node_path, os.path.basename(row['embedding_path']))
-            item_idx = int(row['item_id']) - 1   # item_id is 1-indexed
-            if os.path.exists(pt_path) and 0 <= item_idx < n_items:
+            new_idx = item_map.get(int(row['item_id']), 0)
+            if os.path.exists(pt_path) and new_idx > 0:
                 t = torch.load(pt_path, map_location='cpu', weights_only=False)
-                return item_idx, t.float()
+                return new_idx, t.float()
             return None
 
         rows = [row for _, row in merged.iterrows()]
@@ -106,10 +115,10 @@ def zero_shot_evaluate(
                     found += 1
 
         print(f"   Loaded {found} / {len(merged)} matched embeddings.")
-        item_embed = torch.cat([sasrec_embed, aligned], dim=-1)
+        item_embed = torch.cat([sasrec_remapped, aligned], dim=-1)
     else:
         print(f"\n3. node_path not provided or invalid — using SASRec only.")
-        item_embed = sasrec_embed
+        item_embed = sasrec_remapped
 
     print(f"   Final item embedding shape: {item_embed.shape}")
 

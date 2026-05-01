@@ -1,0 +1,25 @@
+{
+  "files.watcherExclude": {
+    "**/datasets/**": true,
+    "**/logs/**": true,
+    "**/results/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/.git/**": true
+  },
+  "files.exclude": {
+    "**/datasets": true,
+    "**/logs": true,
+    "**/results": true,
+    "**/.venv": true
+  },
+  "search.exclude": {
+    "**/datasets/**": true,
+    "**/logs/**": true,
+    "**/results/**": true
+  },
+  "git.enabled": false,
+  "python.analysis.indexing": false,
+  "explorer.autoReveal": false,
+  "files.useExperimentalFileWatcher": false
+}

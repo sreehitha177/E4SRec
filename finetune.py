@@ -1,3 +1,4 @@
+import io
 import os
 from typing import List
 
@@ -25,18 +26,23 @@ def train(
     cache_dir: str = "",
     output_dir: str = "",
     task_type: str = "sequential",
-    use_completion_ratio: bool = False,
-    completion_path: str = "data_preproc/user_sessions_with_completion.csv",
-    source_path: str = "data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen10_minhist50.csv",
+    # multi-modal fusion
+    fusion_strategy: str = "concat",
+    fusion_target_dim: int = 0,  # 0 = use SASRec dim; ignored for concat
+    audio_node_path: str = "",
+    lyric_node_path: str = "",
+    mapping_path: str = "datasets/sequential/LastFM/item_id_master_map.csv",
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 8,
     num_epochs: int = 1,
+    max_steps: int = -1,
     learning_rate: float = 3e-4,
     cutoff_len: int = 4096,
     val_set_size: int = 0,
     lr_scheduler: str = "cosine",
-    warmup_steps: int = 100, 
+    warmup_steps: int = 0,
+    warmup_ratio: float = 0.1,
     # lora hyperparams
     lora_r: int = 16,
     lora_alpha: int = 16,
@@ -54,6 +60,8 @@ def train(
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     prompt_template_name: str = "alpaca"
+    ,
+    load_in_4bit: bool = True,
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -66,11 +74,13 @@ def train(
             f"batch_size: {batch_size}\n"
             f"micro_batch_size: {micro_batch_size}\n"
             f"num_epochs: {num_epochs}\n"
+            f"max_steps: {max_steps}\n"
             f"learning_rate: {learning_rate}\n"
             f"cutoff_len: {cutoff_len}\n"
             f"val_set_size: {val_set_size}\n"
             f"lr_scheduler: {lr_scheduler}\n"
             f"warmup_steps: {warmup_steps}\n"
+            f"warmup_ratio: {warmup_ratio}\n"
             f"lora_r: {lora_r}\n"
             f"lora_alpha: {lora_alpha}\n"
             f"lora_dropout: {lora_dropout}\n"
@@ -83,6 +93,7 @@ def train(
             f"wandb_watch: {wandb_watch}\n"
             f"wandb_log_model: {wandb_log_model}\n"
             f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
+            f"load_in_4bit: {load_in_4bit}\n"
         )
     assert base_model, "Please specify a --base_model, e.g. a local Qwen snapshot path"
     if batch_size % micro_batch_size != 0:
@@ -128,16 +139,42 @@ def train(
                 f"Missing sequential item embeddings: {sasrec_embed_path}. "
                 "Generate SASRec_item_embed.pkl before finetuning."
             )
-        dataset = SequentialDataset(
-            data_path,
-            50,
-            use_completion_ratio=use_completion_ratio,
-            completion_path=completion_path,
-            source_path=source_path,
-        )
-        user_embed, item_embed = None, pickle.load(open(sasrec_embed_path, 'rb'))
+        dataset = SequentialDataset(data_path, 50)
+
+        class _CpuUnpickler(pickle.Unpickler):
+            """Remap any CUDA storage to CPU so the file loads on CPU-only nodes."""
+            def find_class(self, module, name):
+                if module == 'torch.storage' and name == '_load_from_bytes':
+                    return lambda b: torch.load(io.BytesIO(b), map_location='cpu', weights_only=False)
+                return super().find_class(module, name)
+        with open(sasrec_embed_path, 'rb') as _f:
+            raw_embed = _CpuUnpickler(_f).load()  # shape: [max_raw_id, embed_dim]
+
+        input_dim = raw_embed.shape[1]
+        n_items = len(dataset.item_map) + 1  # +1 for padding row at index 0
+        sasrec_embed = torch.zeros(n_items, input_dim)
+        for raw_id, new_idx in dataset.item_map.items():
+            if raw_id < raw_embed.shape[0]:
+                sasrec_embed[new_idx] = raw_embed[raw_id]
+        del raw_embed
+
+        # Load additional modalities if paths are provided.
+        embed_list = [sasrec_embed]
+        if audio_node_path or lyric_node_path:
+            from utils.fusion import load_node_embeddings
+            if audio_node_path:
+                ae = load_node_embeddings(audio_node_path, mapping_path, n_items, dataset.item_map, "audio")
+                if ae is not None:
+                    embed_list.append(ae)
+            if lyric_node_path:
+                le = load_node_embeddings(lyric_node_path, mapping_path, n_items, dataset.item_map, "lyric")
+                if le is not None:
+                    embed_list.append(le)
+
+        # Single modality → pass Tensor (existing path); multiple → pass List.
+        item_embed = embed_list if len(embed_list) > 1 else embed_list[0]
+        user_embed = None
         data_collator = SequentialCollator()
-        input_dim = item_embed.shape[1]
     else:
         raise ValueError("task_type must be either 'general' or 'sequential'")
 
@@ -152,10 +189,13 @@ def train(
         lora_dropout=lora_dropout,
         lora_target_modules=lora_target_modules,
         device_map=device_map,
+        load_in_4bit=load_in_4bit,
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=user_embed,
         input_embeds=item_embed,
-        use_completion_ratio=use_completion_ratio,
+        fusion_strategy=fusion_strategy,
+        fusion_target_dim=fusion_target_dim or input_dim,
+        max_seq_len=cutoff_len,
     )
 
     if not ddp and torch.cuda.device_count() > 1:
@@ -163,32 +203,89 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
-    trainer = transformers.Trainer(
+    class PeftTrainer(transformers.Trainer):
+        """Save only LoRA adapter weights in intermediate checkpoints.
+
+        The default Trainer.save_model() serialises the full model including
+        bitsandbytes quantisation buffers.  When those checkpoints are resumed
+        the bnb metadata keys are unexpected in the freshly-quantised model,
+        producing the 'UNEXPECTED keys' warnings and potential load errors.
+        Overriding _save_checkpoint to call save_pretrained with
+        save_embedding_layers=False avoids embedding/quant-buffer bloat.
+        """
+
+        def _save_checkpoint(self, model, trial, **kwargs):
+            # Let the parent do book-keeping (scheduler, optimizer, rng state)
+            super()._save_checkpoint(model, trial, **kwargs)
+            # Re-save the model portion using PEFT's adapter-only path so that
+            # the next resume does not pick up bnb quantisation buffers.
+            checkpoint_folder = f"checkpoint-{self.state.global_step}"
+            output_dir = os.path.join(self.args.output_dir, checkpoint_folder)
+            model.llama_model.save_pretrained(output_dir, save_embedding_layers=False)
+
+    # Build a val dataset from the held-out valData entries when requested.
+    # SequentialDataset.valData maps user -> [history, target_item]; we create
+    # a flat list of (seq, label) pairs identical in format to trainData.
+    eval_dataset = None
+    if val_set_size > 0 and task_type == "sequential" and hasattr(dataset, "valData"):
+        val_pairs = []
+        for user, entry in dataset.valData.items():
+            if len(entry) == 2:
+                history, target = entry
+                seq = history[-dataset.maxlen:]
+                val_pairs.append((seq, target))
+        if val_set_size < len(val_pairs):
+            import random
+            random.seed(42)
+            val_pairs = random.sample(val_pairs, val_set_size)
+
+        class _ValDataset(torch.utils.data.Dataset):
+            def __init__(self, pairs):
+                self.pairs = pairs
+            def __len__(self):
+                return len(self.pairs)
+            def __getitem__(self, idx):
+                return self.pairs[idx]
+
+        eval_dataset = _ValDataset(val_pairs)
+        print(f"Val dataset: {len(eval_dataset)} samples")
+
+    use_val = eval_dataset is not None and len(eval_dataset) > 0
+    # Align eval_steps with save_steps so best-model tracking works on small
+    # datasets; use 10% of an epoch or 50 steps, whichever is smaller.
+    steps_per_epoch = max(1, len(dataset) // (micro_batch_size * gradient_accumulation_steps))
+    total_steps = steps_per_epoch * num_epochs if max_steps == -1 else max_steps
+    computed_warmup_steps = warmup_steps if warmup_steps > 0 else max(1, int(total_steps * warmup_ratio))
+    eval_save_steps = max(10, min(50, steps_per_epoch // 2))
+    print(f"steps_per_epoch={steps_per_epoch}, total_steps={total_steps}, warmup_steps={computed_warmup_steps}, eval_save_steps={eval_save_steps}")
+
+    trainer = PeftTrainer(
         model=model,
         train_dataset=dataset,
-        eval_dataset=None,
+        eval_dataset=eval_dataset,
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=warmup_steps,
+            warmup_steps=computed_warmup_steps,
             num_train_epochs=num_epochs,
+            max_steps=max_steps,
             learning_rate=learning_rate,
             # fp16=True,
             bf16=True,
             logging_steps=1,
-            optim="adamw_torch",
+            optim="paged_adamw_8bit",
             gradient_checkpointing=True,         # trades compute for memory
             gradient_checkpointing_kwargs={"use_reentrant": False},
             dataloader_num_workers=0,
-            # evaluation_strategy="steps" if val_set_size > 0 else "no",
-            eval_strategy="steps" if val_set_size > 0 else "no",
+            eval_strategy="steps" if use_val else "no",
             save_strategy="steps",
-            eval_steps=200 if val_set_size > 0 else None,
-            save_steps=500,
+            eval_steps=eval_save_steps if use_val else None,
+            save_steps=eval_save_steps,
             lr_scheduler_type=lr_scheduler,
             output_dir=output_dir,
             save_total_limit=2,
-            load_best_model_at_end=True if val_set_size > 0 else False,
+            load_best_model_at_end=use_val,
+            metric_for_best_model="eval_loss" if use_val else None,
             ddp_find_unused_parameters=False if ddp else None,
             report_to="none",
             run_name=None,
@@ -197,6 +294,10 @@ def train(
     )
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+
+    # Free optimizer states and gradient buffers before running eval inference.
+    del trainer
+    torch.cuda.empty_cache()
 
     model.eval()
     topk = [1, 5, 10, 20, 100]
@@ -208,52 +309,48 @@ def train(
 
     testData = dataset.testData
     users = np.arange(dataset.n_user)
-    for u in users:
-        if task_type == 'general':
-            all_pos = [dataset.allPos[u]]
-            groundTruth = [testData[u]]
-            inputs = torch.LongTensor([u] + all_pos[0]).cuda().unsqueeze(0)
-            inputs_mask = torch.ones(inputs.shape).cuda()
-            _, ratings = model.predict(inputs, inputs_mask)
-            exclude_index = []
-            exclude_items = []
-            for range_i, its in enumerate(all_pos):
-                exclude_index.extend([range_i] * len(its))
-                exclude_items.extend(its)
-            ratings[exclude_index, exclude_items] = -(1 << 10)
+    with torch.inference_mode():
+        for u in users:
+            if task_type == 'general':
+                all_pos = [dataset.allPos[u]]
+                groundTruth = [testData[u]]
+                inputs = torch.LongTensor([u] + all_pos[0]).cuda().unsqueeze(0)
+                inputs_mask = torch.ones(inputs.shape).cuda()
+                _, ratings = model.predict(inputs, inputs_mask)
+                exclude_index = []
+                exclude_items = []
+                for range_i, its in enumerate(all_pos):
+                    exclude_index.extend([range_i] * len(its))
+                    exclude_items.extend(its)
+                ratings[exclude_index, exclude_items] = -(1 << 10)
 
-        elif task_type == 'sequential':
-            seq, completion_ratio, target = dataset.get_eval_record(u, subset='test')
-            if len(seq) == 0:
-                continue
-            seq = seq[-dataset.maxlen:]
-            if completion_ratio is not None:
-                completion_ratio = completion_ratio[-dataset.maxlen:]
-            selected_items = [[target] + dataset.allPos[u]]
-            groundTruth = [[0]]
-            device = next(model.llama_model.parameters()).device
-            inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
-            inputs_mask = torch.ones(inputs.shape, device=device)
-            completion_tensor = None
-            if completion_ratio is not None:
-                completion_tensor = torch.FloatTensor(completion_ratio).to(device).unsqueeze(0)
-            _, ratings = model.predict(inputs, inputs_mask, completion_ratio=completion_tensor)
-            ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
+            elif task_type == 'sequential':
+                if len(testData[u]) == 0:
+                    continue
+                selected_items = [[testData[u][1]] + dataset.allPos[u]]
+                groundTruth = [[0]]
+                device = next(model.llama_model.parameters()).device
+                # Truncate to maxlen (same as training) to avoid OOM on long histories
+                seq = testData[u][0][-dataset.maxlen:]
+                inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
+                inputs_mask = torch.ones(inputs.shape, device=device)
+                _, ratings = model.predict(inputs, inputs_mask)
+                ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
 
-        _, ratings_K = torch.topk(ratings, k=topk[-1])
-        ratings_K = ratings_K.cpu().numpy()
+            _, ratings_K = torch.topk(ratings, k=topk[-1])
+            ratings_K = ratings_K.cpu().numpy()
 
-        r = getLabel(groundTruth, ratings_K)
-        for j, k in enumerate(topk):
-            pre, rec = RecallPrecision_atK(groundTruth, r, k)
-            mrr = MRR_atK(groundTruth, r, k)
-            map = MAP_atK(groundTruth, r, k)
-            ndcg = NDCG_atK(groundTruth, r, k)
-            results['Precision'][j] += pre
-            results['Recall'][j] += rec
-            results['MRR'][j] += mrr
-            results['MAP'][j] += map
-            results['NDCG'][j] += ndcg
+            r = getLabel(groundTruth, ratings_K)
+            for j, k in enumerate(topk):
+                pre, rec = RecallPrecision_atK(groundTruth, r, k)
+                mrr = MRR_atK(groundTruth, r, k)
+                map = MAP_atK(groundTruth, r, k)
+                ndcg = NDCG_atK(groundTruth, r, k)
+                results['Precision'][j] += pre
+                results['Recall'][j] += rec
+                results['MRR'][j] += mrr
+                results['MAP'][j] += map
+                results['NDCG'][j] += ndcg
 
     for key in results.keys():
         results[key] /= float(len(users))
@@ -266,14 +363,24 @@ def train(
               f'NDCG@{k}: {results["NDCG"][j]} \n')
 
     os.makedirs(output_dir, exist_ok=True)
-    model.llama_model.save_pretrained(output_dir)
+    # Save only the LoRA adapter weights, not the quantized base model weights.
+    # Saving the full model (including bnb 4-bit buffers) causes unexpected-key
+    # errors when the checkpoint is reloaded into a freshly-quantized model.
+    model.llama_model.save_pretrained(output_dir, save_embedding_layers=False)
     model_path = os.path.join(output_dir, "adapter.pth")
     if task_type == 'general':
         user_proj, input_proj, score = model.user_proj.state_dict(), model.input_proj.state_dict(), model.score.state_dict()
         torch.save({'user_proj': user_proj, 'input_proj': input_proj, 'score': score}, model_path)
     elif task_type == 'sequential':
-        input_proj, score = model.input_proj.state_dict(), model.score.state_dict()
-        torch.save({'input_proj': input_proj, 'score': score}, model_path)
+        save_dict = {
+            'input_proj': model.input_proj.state_dict(),
+            'score':      model.score.state_dict(),
+        }
+        if model.fusion is not None:
+            save_dict['fusion'] = model.fusion.state_dict()
+            save_dict['fusion_strategy'] = fusion_strategy
+            save_dict['fusion_target_dim'] = fusion_target_dim or input_dim
+        torch.save(save_dict, model_path)
     print(f"Saved PEFT adapter to {output_dir}")
     print(f"Saved projection heads to {model_path}")
 
