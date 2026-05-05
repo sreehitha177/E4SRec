@@ -89,6 +89,14 @@ CHECKPOINT=$(
 )
 if [ -n "$CHECKPOINT" ]; then
     echo "Resuming from checkpoint: $CHECKPOINT"
+    # Workaround for CVE-2025-32434: transformers blocks torch.load on torch < 2.6.
+    # Model weights are in safetensors and load fine; delete only the pickle-based files.
+    rm -f "${CHECKPOINT}/optimizer.pt"       && echo "  Removed optimizer.pt"
+    rm -f "${CHECKPOINT}/scheduler.pt"      && echo "  Removed scheduler.pt"
+    rm -f "${CHECKPOINT}/scaler.pt"         && echo "  Removed scaler.pt"
+    rm -f "${CHECKPOINT}/training_args.bin" && echo "  Removed training_args.bin"
+    find "${CHECKPOINT}" -maxdepth 1 -name 'rng_state*.pth' -delete \
+        && echo "  Removed rng_state files"
 else
     echo "No checkpoint found, starting fresh"
 fi
@@ -109,7 +117,7 @@ python -u finetune.py \
     ${LYRIC_NODE_PATH:+--lyric_node_path "$LYRIC_NODE_PATH"} \
     --mapping_path "$MAPPING_PATH" \
     --batch_size 64 \
-    --micro_batch_size 2 \
+    --micro_batch_size "${MICRO_BATCH:-2}" \
     --num_epochs 5 \
     --max_steps "$MAX_STEPS" \
     --learning_rate 1e-4 \

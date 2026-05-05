@@ -32,6 +32,9 @@ def train(
     audio_node_path: str = "",
     lyric_node_path: str = "",
     mapping_path: str = "datasets/sequential/LastFM/item_id_master_map.csv",
+    # completion ratio incorporation
+    completion_ratios_path: str = "",  # path to interaction_completion_ratios.pkl
+    completion_ratios_mode: str = "none",  # "none" | "prompt" | "embed"
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 8,
@@ -123,6 +126,9 @@ def train(
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
+    comp_data = None       # {user_id_int: [ratio, ...]} — populated for sequential + completion modes
+    base_instruction = ""  # prompt-injection instruction text — set when mode == "prompt"
+
     if task_type == 'general':
         dataset = BipartiteGraphDataset(data_path)
         user_embed, item_embed = (
@@ -139,7 +145,19 @@ def train(
                 f"Missing sequential item embeddings: {sasrec_embed_path}. "
                 "Generate SASRec_item_embed.pkl before finetuning."
             )
-        dataset = SequentialDataset(data_path, 50)
+        # Load per-interaction completion ratio data if requested.
+        comp_data = None
+        if completion_ratios_path and completion_ratios_mode != "none":
+            if not os.path.exists(completion_ratios_path):
+                raise FileNotFoundError(
+                    f"completion_ratios_path not found: {completion_ratios_path}. "
+                    "Run compute_completion_ratio.py first."
+                )
+            with open(completion_ratios_path, "rb") as _cf:
+                comp_data = pickle.load(_cf)
+            print(f"Loaded completion ratios for {len(comp_data)} users.")
+
+        dataset = SequentialDataset(data_path, 50, completion_data=comp_data)
 
         class _CpuUnpickler(pickle.Unpickler):
             """Remap any CUDA storage to CPU so the file loads on CPU-only nodes."""
@@ -174,7 +192,11 @@ def train(
         # Single modality → pass Tensor (existing path); multiple → pass List.
         item_embed = embed_list if len(embed_list) > 1 else embed_list[0]
         user_embed = None
-        data_collator = SequentialCollator()
+        base_instruction = prompter.generate_prompt(task_type)[0]
+        data_collator = SequentialCollator(
+            completion_mode=completion_ratios_mode,
+            base_instruction=base_instruction,
+        )
     else:
         raise ValueError("task_type must be either 'general' or 'sequential'")
 
@@ -196,6 +218,7 @@ def train(
         fusion_strategy=fusion_strategy,
         fusion_target_dim=fusion_target_dim or input_dim,
         max_seq_len=cutoff_len,
+        use_completion_embed=(completion_ratios_mode == "embed"),
     )
 
     if not ddp and torch.cuda.device_count() > 1:
@@ -233,7 +256,12 @@ def train(
             if len(entry) == 2:
                 history, target = entry
                 seq = history[-dataset.maxlen:]
-                val_pairs.append((seq, target))
+                comp = None
+                if comp_data is not None:
+                    user_ratios = comp_data.get(user, [])
+                    if user_ratios:
+                        comp = user_ratios[-len(seq):]
+                val_pairs.append((seq, comp, target))
         if val_set_size < len(val_pairs):
             import random
             random.seed(42)
@@ -299,6 +327,9 @@ def train(
     del trainer
     torch.cuda.empty_cache()
 
+    # load_best_model_at_end internally calls model.to(device), which moves
+    # self.score from CPU to CUDA.  Re-assert CPU placement before eval.
+    model.score = model.score.cpu().float()
     model.eval()
     topk = [1, 5, 10, 20, 100]
     results = {'Precision': np.zeros(len(topk)),
@@ -334,7 +365,30 @@ def train(
                 seq = testData[u][0][-dataset.maxlen:]
                 inputs = torch.LongTensor(seq).to(device).unsqueeze(0)
                 inputs_mask = torch.ones(inputs.shape, device=device)
-                _, ratings = model.predict(inputs, inputs_mask)
+
+                eval_hist_meta = None
+                eval_comp_ratios = None
+                if comp_data is not None and completion_ratios_mode != "none":
+                    user_ratios = comp_data.get(u, [])
+                    ratios_slice = user_ratios[-len(seq):] if user_ratios else []
+                    if completion_ratios_mode == "prompt":
+                        ratio_strs = [
+                            "?" if (v is None or (v != v)) else f"{v:.2f}"
+                            for v in ratios_slice
+                        ]
+                        eval_hist_meta = [
+                            f"{base_instruction}\n"
+                            f"Completion ratios for listened songs in order: [{', '.join(ratio_strs)}]"
+                        ]
+                    elif completion_ratios_mode == "embed":
+                        vals = [0.0 if (v is None or (v != v)) else float(v) for v in ratios_slice]
+                        eval_comp_ratios = torch.FloatTensor([vals]).to(device)
+
+                _, ratings = model.predict(
+                    inputs, inputs_mask,
+                    history_metadata=eval_hist_meta,
+                    completion_ratios=eval_comp_ratios,
+                )
                 ratings = ratings[[[[k] * len(selected_items[0]) for k in range(len(ratings))], selected_items]]
 
             _, ratings_K = torch.topk(ratings, k=topk[-1])

@@ -23,47 +23,57 @@ def _load_sasrec(data_path: str) -> torch.Tensor:
     return torch.tensor(raw).float()
 
 
-def build_metadata_lookup(data_path: str, metadata_path: str, item_map: dict):
-    """Build (meta_lookup, name_lookup) both keyed by remapped new_idx."""
-    master_map = pd.read_csv(os.path.join(data_path, 'item_id_master_map.csv'))
-    full_meta  = pd.read_csv(metadata_path)
-
-    full_meta['_key']  = (full_meta['artist_name'].str.lower().str.strip() + '||' +
-                          full_meta['track_name'].str.lower().str.strip())
-    master_map['_key'] = (master_map['artist_name'].str.lower().str.strip() + '||' +
-                          master_map['track_name'].str.lower().str.strip())
-
-    merged_meta = (full_meta.merge(master_map[['item_id', '_key']], on='_key', how='inner')
-                             .drop_duplicates(subset=['_key']))
-    print(f"   Metadata: {len(full_meta)} rows | master: {len(master_map)} | matched: {len(merged_meta)}")
-
-    def _fmt(val):
-        return str(val) if pd.notna(val) and str(val).strip() not in ('', 'nan') else None
-
-    name_lookup = {}
-    for _, row in master_map.iterrows():
+def build_name_lookup(mapping_path: str, item_map: dict) -> dict:
+    master = pd.read_csv(mapping_path)
+    lookup = {}
+    for _, row in master.iterrows():
         new_idx = item_map.get(int(row['item_id']), None)
-        if new_idx is not None and pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name')):
-            name_lookup[new_idx] = f"'{row['track_name']}' by {row['artist_name']}"
+        if new_idx is not None:
+            lookup[new_idx] = f"'{row.get('track_name', '?')}' by {row.get('artist_name', '?')}"
+    return lookup
 
-    meta_lookup = {}
-    for _, row in merged_meta.iterrows():
-        new_idx = item_map.get(int(row['item_id']), None)
-        if new_idx is None:
-            continue
-        parts = []
-        if _fmt(row.get('genre')):   parts.append(f"genre: {row['genre']}")
-        if _fmt(row.get('year')):    parts.append(f"year: {int(row['year'])}")
-        if _fmt(row.get('tags')):    parts.append(f"tags: {row['tags']}")
-        if _fmt(row.get('tempo')):   parts.append(f"tempo: {row['tempo']:.0f} bpm")
-        if _fmt(row.get('valence')): parts.append(f"valence: {row['valence']:.2f}")
-        if _fmt(row.get('energy')):  parts.append(f"energy: {row['energy']:.2f}")
-        desc = f"'{row['track_name']}' by {row['artist_name']}"
-        if parts:
-            desc += f" [{' | '.join(parts)}]"
-        meta_lookup[new_idx] = desc
 
-    return meta_lookup, name_lookup
+# def build_metadata_lookup(data_path: str, metadata_path: str, item_map: dict):
+#     """Build (meta_lookup, name_lookup) both keyed by remapped new_idx."""
+#     master_map = pd.read_csv(os.path.join(data_path, 'item_id_master_map.csv'))
+#     full_meta  = pd.read_csv(metadata_path)
+#
+#     full_meta['_key']  = (full_meta['artist_name'].str.lower().str.strip() + '||' +
+#                           full_meta['track_name'].str.lower().str.strip())
+#     master_map['_key'] = (master_map['artist_name'].str.lower().str.strip() + '||' +
+#                           master_map['track_name'].str.lower().str.strip())
+#
+#     merged_meta = (full_meta.merge(master_map[['item_id', '_key']], on='_key', how='inner')
+#                              .drop_duplicates(subset=['_key']))
+#     print(f"   Metadata: {len(full_meta)} rows | master: {len(master_map)} | matched: {len(merged_meta)}")
+#
+#     def _fmt(val):
+#         return str(val) if pd.notna(val) and str(val).strip() not in ('', 'nan') else None
+#
+#     name_lookup = {}
+#     for _, row in master_map.iterrows():
+#         new_idx = item_map.get(int(row['item_id']), None)
+#         if new_idx is not None and pd.notna(row.get('track_name')) and pd.notna(row.get('artist_name')):
+#             name_lookup[new_idx] = f"'{row['track_name']}' by {row['artist_name']}"
+#
+#     meta_lookup = {}
+#     for _, row in merged_meta.iterrows():
+#         new_idx = item_map.get(int(row['item_id']), None)
+#         if new_idx is None:
+#             continue
+#         parts = []
+#         if _fmt(row.get('genre')):   parts.append(f"genre: {row['genre']}")
+#         if _fmt(row.get('year')):    parts.append(f"year: {int(row['year'])}")
+#         if _fmt(row.get('tags')):    parts.append(f"tags: {row['tags']}")
+#         if _fmt(row.get('tempo')):   parts.append(f"tempo: {row['tempo']:.0f} bpm")
+#         if _fmt(row.get('valence')): parts.append(f"valence: {row['valence']:.2f}")
+#         if _fmt(row.get('energy')):  parts.append(f"energy: {row['energy']:.2f}")
+#         desc = f"'{row['track_name']}' by {row['artist_name']}"
+#         if parts:
+#             desc += f" [{' | '.join(parts)}]"
+#         meta_lookup[new_idx] = desc
+#
+#     return meta_lookup, name_lookup
 
 
 def zero_shot_evaluate(
@@ -71,7 +81,7 @@ def zero_shot_evaluate(
     data_path: str = "datasets/sequential/LastFM/",
     audio_node_path: str = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3",
     lyric_node_path: str = "/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7",
-    metadata_path: str = "",
+    # metadata_path: str = "",  # disabled for now
     mapping_path: str = "datasets/sequential/LastFM/item_id_master_map.csv",
     cache_dir: str = "",
     output_dir: str = "results",
@@ -89,6 +99,9 @@ def zero_shot_evaluate(
     max_test_users: int = 0,
     prompt_template_name: str = "alpaca",
     device_map: str = "auto",
+    # completion ratio incorporation: "none" | "prompt" | "embed"
+    completion_ratios_path: str = "",
+    completion_ratios_mode: str = "none",
 ):
     os.makedirs(output_dir, exist_ok=True)
     print("\nConfiguration:")
@@ -96,7 +109,6 @@ def zero_shot_evaluate(
     print(f"  Dataset:           {data_path}")
     print(f"  Audio node path:   {audio_node_path}")
     print(f"  Lyric node path:   {lyric_node_path}")
-    print(f"  Metadata path:     {metadata_path}")
     print(f"  Fusion strategy:   {fusion_strategy}")
     print(f"  Fusion weights:    {fusion_weights or 'equal (default)'}")
     print(f"  Fusion target dim: {fusion_target_dim or 'SASRec dim (default)'}")
@@ -112,11 +124,20 @@ def zero_shot_evaluate(
                 f"--fusion_weights must be comma-separated floats. Got: '{fusion_weights}'"
             )
 
-    # ── 1. Dataset ────────────────────────────────────────────────────────────
+    print(f"  Completion mode:   {completion_ratios_mode}")
+
+    # ── 1. Dataset + completion ratios ───────────────────────────────────────
     print("\n1. Loading dataset...")
     dataset  = SequentialDataset(data_path, 50)
     item_map = dataset.item_map
     n_items  = len(item_map) + 1
+
+    comp_data = None
+    if completion_ratios_path and completion_ratios_mode != "none":
+        import math
+        with open(completion_ratios_path, "rb") as _f:
+            comp_data = pickle.load(_f)
+        print(f"   Loaded completion ratios for {len(comp_data)} users.")
 
     # ── 2. Load & remap embeddings ────────────────────────────────────────────
     print("\n2. Loading SASRec embeddings...")
@@ -157,13 +178,13 @@ def zero_shot_evaluate(
             item_embed = fusion(embeds)
         print(f"   Fused shape: {item_embed.shape}")
 
-    # ── 4. Metadata lookup ────────────────────────────────────────────────────
-    print("\n4. Building metadata lookup...")
-    meta_lookup, name_lookup = build_metadata_lookup(data_path, metadata_path, item_map)
+    # ── 4. Name lookup ────────────────────────────────────────────────────────
+    name_lookup = build_name_lookup(mapping_path, item_map)
 
     # ── 5. Model ──────────────────────────────────────────────────────────────
-    print(f"\n5. Loading base model: {base_model}")
+    print(f"\n4. Loading base model: {base_model}")
     prompter = Prompter(prompt_template_name)
+    base_instruction = prompter.generate_prompt(task_type)[0]
     model = LLM4Rec(
         base_model=base_model,
         task_type=task_type,
@@ -178,11 +199,12 @@ def zero_shot_evaluate(
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=None,
         input_embeds=item_embed,
+        use_completion_embed=(completion_ratios_mode == "embed"),
     )
     model.eval()
 
     # ── 6. Evaluation ─────────────────────────────────────────────────────────
-    print("\n6. Running zero-shot evaluation...")
+    print("\n5. Running zero-shot evaluation...")
     topk    = [1, 5, 10, 20, 100]
     results = {m: np.zeros(len(topk)) for m in ['Precision', 'Recall', 'MRR', 'MAP', 'NDCG']}
 
@@ -202,17 +224,47 @@ def zero_shot_evaluate(
             selected_items = [dataset.allPos[u]]
             groundTruth    = [[0]]
 
-            history_lines = []
-            for i, iid in enumerate(full_history[-10:]):
-                desc = meta_lookup.get(iid, name_lookup.get(iid, f"Item {iid}"))
-                history_lines.append(f"{i+1}. {desc}")
+            history_lines = [
+                f"{i+1}. {name_lookup.get(iid, f'Item {iid}')}"
+                for i, iid in enumerate(full_history[-10:])
+            ]
             prompt_texts = prompter.generate_prompt(task_type, "\n".join(history_lines))
 
             device      = next(model.llama_model.parameters()).device
             inputs      = torch.LongTensor(seq).to(device).unsqueeze(0)
             inputs_mask = torch.ones(inputs.size()).to(device)
 
-            _, ratings = model.predict(inputs, inputs_mask, history_metadata=[prompt_texts[0]])
+            eval_hist_meta  = [prompt_texts[0]]
+            eval_comp_ratios = None
+
+            if comp_data is not None:
+                # comp_data is 1-indexed; testData user keys are 0-indexed
+                user_ratios  = comp_data.get(u + 1, [])
+                ratios_slice = user_ratios[-len(seq):] if user_ratios else []
+
+                if completion_ratios_mode == "prompt":
+                    ratio_strs = [
+                        "?" if (v is None or math.isnan(v)) else f"{v:.2f}"
+                        for v in ratios_slice
+                    ]
+                    eval_hist_meta = [
+                        prompt_texts[0] +
+                        f"\nCompletion ratios for listened songs in order: [{', '.join(ratio_strs)}]"
+                    ]
+                elif completion_ratios_mode == "embed":
+                    vals = [0.0 if (v is None or math.isnan(v)) else float(v) for v in ratios_slice]
+                    eval_comp_ratios = torch.FloatTensor([vals]).to(device)
+
+            if n_eval == 0:
+                print("\n--- Prompt sent to LLM (first user) ---")
+                print(eval_hist_meta[0])
+                print("--- End of prompt ---\n")
+
+            _, ratings = model.predict(
+                inputs, inputs_mask,
+                history_metadata=eval_hist_meta,
+                completion_ratios=eval_comp_ratios,
+            )
             idx_row    = torch.arange(ratings.size(0)).unsqueeze(1)
             ratings    = ratings[idx_row, selected_items]
 
@@ -245,13 +297,14 @@ def zero_shot_evaluate(
         ['SASRec']
         + (['audio'] if audio_embed is not None else [])
         + (['lyric'] if lyric_embed is not None else [])
-        + (['meta']  if metadata_path else [])
     )
     if fusion_strategy == 'weighted_sum' and parsed_weights:
         weight_tag = '-'.join(f"{w:.2f}" for w in parsed_weights)
         tag = f"{modality_tag}_weighted_sum_{weight_tag}"
     else:
         tag = f"{modality_tag}_{fusion_strategy}"
+    if completion_ratios_mode != "none":
+        tag = f"{tag}_completion_{completion_ratios_mode}"
     output_file = os.path.join(output_dir, f"zeroshot_{tag}.txt")
     with open(output_file, 'w') as f:
         f.write(f"Zero-Shot Evaluation — {tag}\n")
@@ -259,7 +312,6 @@ def zero_shot_evaluate(
         f.write(f"Dataset: {data_path}\n")
         f.write(f"Audio node path: {audio_node_path}\n")
         f.write(f"Lyric node path: {lyric_node_path}\n")
-        f.write(f"Metadata path: {metadata_path}\n")
         f.write(f"Fusion strategy: {fusion_strategy}\n")
         f.write(f"Fusion weights:  {fusion_weights or 'equal'}\n")
         f.write(f"Fusion target dim: {fusion_target_dim or 'SASRec dim'}\n\n")

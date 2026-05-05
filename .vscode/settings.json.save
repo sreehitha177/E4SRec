@@ -1,0 +1,76 @@
+{
+  "files.watcherExclude": {
+    "**/datasets/**": true,
+    "**/logs/**": true,
+    "**/results/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/.git/**": true
+  },
+  "files.exclude": {
+    "**/datasets": true,
+    "**/logs": true,
+    "**/results": true,
+    "**/.venv": true
+  },
+  "search.exclude": {
+    "**/datasets/**": true,
+{
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/datasets/**": true,
+    "**/logs/**": true,
+    "**/results/**": true,
+    "**/models/**": true,
+    "**/checkpoints/**": true,
+    "**/embeddings/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/*.egg-info/**": true,
+    "**/wandb/**": true,
+    "**/runs/**": true,
+    "**/outputs/**": true
+  },
+  "files.exclude": {
+    "**/datasets": true,
+    "**/logs": true,
+    "**/results": true,
+    "**/models": true,
+    "**/checkpoints": true,
+    "**/embeddings": true,
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/*.egg-info": true,
+    "**/wandb": true
+  },
+  "search.exclude": {
+    "**/datasets/**": true,
+    "**/logs/**": true,
+    "**/results/**": true,
+    "**/models/**": true,
+    "**/checkpoints/**": true,
+    "**/embeddings/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true
+  },
+  "git.enabled": false,
+  "git.decorations.enabled": false,
+  "python.analysis.indexing": false,
+  "python.analysis.autoSearchPaths": false,
+  "python.analysis.useLibraryCodeForTypes": false,
+  "pylance.lsifIndexing": false,
+  "explorer.autoReveal": false,
+  "files.autoSave": "off",
+  "extensions.experimental.affinity": {},
+  "remote.extensionKind": {
+    "ms-python.python": ["ui"],
+    "ms-python.vscode-pylance": ["ui"]
+  }
+}    "**/logs/**": true,
+    "**/results/**": true
+  },
+  "git.enabled": false,
+  "python.analysis.indexing": false,
+  "explorer.autoReveal": false,
+  "files.useExperimentalFileWatcher": false
+}

@@ -151,6 +151,12 @@ class LLM4Rec(nn.Module):
             self.fusion = None
             proj_in = self.input_dim
 
+        # For completion-ratio embed mode, concatenate a scalar to each item embedding
+        # before the projection layer. proj_in grows by 1 to accommodate it.
+        self.use_completion_embed = self.args.get('use_completion_embed', False)
+        if self.use_completion_embed:
+            proj_in += 1
+
         self.input_proj = nn.Linear(proj_in, self.llama_model.config.hidden_size).to(device)
 
         # score head kept on CPU; we slice out only the needed rows during training
@@ -159,17 +165,17 @@ class LLM4Rec(nn.Module):
         self.score = self.score.cpu().float()  # stays on CPU, sliced per-batch
 
 
-    def predict(self, inputs, inputs_mask, history_metadata=None):
-        _, pooled_output = self._encode(inputs, inputs_mask, history_metadata)
+    def predict(self, inputs, inputs_mask, history_metadata=None, completion_ratios=None):
+        _, pooled_output = self._encode(inputs, inputs_mask, history_metadata, completion_ratios)
         # Full catalogue scoring on CPU — score head never goes to GPU.
         pooled_logits = self.score(pooled_output.detach().cpu().float())
         return None, pooled_logits.view(-1, self.output_dim)
 
-    def forward(self, inputs, inputs_mask, labels, history_metadata=None, num_neg: int = 128):
+    def forward(self, inputs, inputs_mask, labels, history_metadata=None, completion_ratios=None, num_neg: int = 128):
         bs = inputs.shape[0]
 
         # Run the LLM encoder on GPU (with gradient flow through LoRA).
-        _, pooled_output = self._encode(inputs, inputs_mask, history_metadata)
+        _, pooled_output = self._encode(inputs, inputs_mask, history_metadata, completion_ratios)
         gpu_device = pooled_output.device
 
         # Sampled softmax: score [positive + num_neg negatives] instead of all items.
@@ -200,7 +206,7 @@ class LLM4Rec(nn.Module):
             attentions=None,
         )
 
-    def _encode(self, inputs, inputs_mask, history_metadata=None):
+    def _encode(self, inputs, inputs_mask, history_metadata=None, completion_ratios=None):
         """Run the LLM and return pooled last-token hidden state (on GPU)."""
         bs = inputs.shape[0]
         device = next(self.llama_model.parameters()).device
@@ -226,11 +232,17 @@ class LLM4Rec(nn.Module):
             x = torch.cat([users, items], dim=1)
         else:
             if self.fusion is not None:
-                # Multi-modality: look up each embedding table, fuse, then project.
                 raw = [emb(inputs) for emb in self.embeds_list]  # list of [bs, T, dim_i]
-                x = self.input_proj(self.fusion(raw))
+                item_feats = self.fusion(raw)
             else:
-                x = self.input_proj(self.input_embeds(inputs))
+                item_feats = self.input_embeds(inputs)  # [bs, T, embed_dim]
+
+            if self.use_completion_embed and completion_ratios is not None:
+                # Concat the per-interaction scalar to each item embedding before projection.
+                cr = completion_ratios.to(device=device, dtype=item_feats.dtype)  # [bs, T]
+                item_feats = torch.cat([item_feats, cr.unsqueeze(-1)], dim=-1)  # [bs, T, dim+1]
+
+            x = self.input_proj(item_feats)
 
         x = torch.cat([instruct_embeds, x, response_embeds], dim=1)
         attention_mask = torch.cat([instruct_mask, inputs_mask, response_mask], dim=1)

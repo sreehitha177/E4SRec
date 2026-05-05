@@ -30,11 +30,20 @@ submit() {
         tag="${tag}_${fusion}"
     fi
 
-    local export_str="ALL,FUSION_STRATEGY=${fusion},AUDIO_NODE_PATH=${audio},LYRIC_NODE_PATH=${lyric}"
+    local micro=2
+    local gres_override=""
+    if [ -n "$lyric" ]; then
+        # Lyric embeddings are 768-dim; the backward pass needs more than 24GB L4.
+        # Request a 48GB GPU instead (overrides #SBATCH --gres in finetune.sh).
+        micro=1
+        gres_override="--gres=gpu:1 --constraint=vram48"
+    fi
+    local export_str="ALL,FUSION_STRATEGY=${fusion},AUDIO_NODE_PATH=${audio},LYRIC_NODE_PATH=${lyric},MICRO_BATCH=${micro}"
     local cmd="sbatch \
         --job-name=ft_${tag} \
         --output=logs/ft_${tag}_%j.log \
         --error=logs/ft_${tag}_%j.err \
+        $gres_override \
         --export=${export_str} \
         finetune.sh"
 
