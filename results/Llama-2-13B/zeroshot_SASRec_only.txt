@@ -1,0 +1,23 @@
+Zero-Shot Evaluation — SASRec_only
+Base model: /datasets/ai/llama2/hub/models--meta-llama--Llama-2-13b-hf/snapshots/5c31dfb671ce7cfe2d7bb7c04375e44c55e815b1
+Seq model:  SASRec
+Dataset:    datasets/sequential/LastFM/
+Audio node path: 
+Lyric node path: 
+Metadata path:   
+Fusion strategy: concat
+Completion mode: none
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.000   0.000 0.000 0.000 0.000
+Top-5        0.005   0.027 0.008 0.008 0.013
+Top-10       0.006   0.056 0.012 0.012 0.022
+Top-20       0.005   0.100 0.015 0.015 0.033
+Top-100      0.005   0.503 0.023 0.023 0.102
+
+Detailed arrays:
+Precision: [0.    0.005 0.006 0.005 0.005]
+Recall: [0.    0.027 0.056 0.1   0.503]
+MRR: [0.    0.008 0.012 0.015 0.023]
+MAP: [0.    0.008 0.012 0.015 0.023]
+NDCG: [0.    0.013 0.022 0.033 0.102]

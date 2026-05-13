@@ -7,9 +7,9 @@
 #SBATCH --gres=gpu:l4:1
 #SBATCH --mem=48G
 #SBATCH --time=48:00:00
+#SBATCH --exclude=gpu056
 #SBATCH --output=logs/finetune_%j.log
 #SBATCH --error=logs/finetune_%j.err
-
 
 # ── Environment ───────────────────────────────────────────────────────────────
 module load conda/latest
@@ -18,7 +18,8 @@ conda activate /work/pi_dagarwal_umass_edu/project_7/snarayana_umass_edu/.conda/
 cd /home/snarayana_umass_edu/E4SRec-1
 mkdir -p logs results
 
-export HF_HOME=/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache
+# HF_CACHE can be overridden per model via --export in the submit script.
+export HF_HOME="${HF_CACHE:-/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
 export NCCL_DEBUG=WARN
@@ -35,10 +36,12 @@ echo "Node       : $(hostname)"
 echo "GPU(s)     : $CUDA_VISIBLE_DEVICES"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_MODEL="/project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28"
+# ── Paths — all overridable via --export in the submit script ─────────────────
+BASE_MODEL="${BASE_MODEL:-/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28}"
 DATA_PATH="datasets/sequential/LastFM/"
 MAPPING_PATH="datasets/sequential/LastFM/item_id_master_map.csv"
+CHECKPOINT_BASE="${CHECKPOINT_BASE:-/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/Qwen2.5-7B}"
+RESULTS_DIR="${RESULTS_DIR:-}"
 
 # ── Fusion config ─────────────────────────────────────────────────────────────
 # FUSION_STRATEGY: concat | weighted_sum | cross_attention | film
@@ -47,20 +50,21 @@ FUSION_TARGET_DIM="${FUSION_TARGET_DIM:-64}"   # ignored for concat
 # Leave empty to skip that modality.
 AUDIO_NODE_PATH="${AUDIO_NODE_PATH:-}"
 LYRIC_NODE_PATH="${LYRIC_NODE_PATH:-}"
+# COMPLETION_RATIOS_MODE: none | prompt | embed
+COMPLETION_RATIOS_PATH="${COMPLETION_RATIOS_PATH:-datasets/sequential/LastFM/interaction_completion_ratios.pkl}"
+COMPLETION_RATIOS_MODE="${COMPLETION_RATIOS_MODE:-none}"
 
 # Derive a modality tag and output dir so every experiment gets its own folder.
 MODALITY_TAG="SASRec"
 [ -n "$AUDIO_NODE_PATH" ] && MODALITY_TAG="${MODALITY_TAG}_audio"
 [ -n "$LYRIC_NODE_PATH" ] && MODALITY_TAG="${MODALITY_TAG}_lyric"
 
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints"
-
 if [ -z "$AUDIO_NODE_PATH" ] && [ -z "$LYRIC_NODE_PATH" ]; then
-    # SASRec-only: fusion strategy is irrelevant, omit from dir name.
     OUTPUT_DIR="${CHECKPOINT_BASE}/SASRec"
 else
     OUTPUT_DIR="${CHECKPOINT_BASE}/${MODALITY_TAG}_${FUSION_STRATEGY}"
 fi
+[ "$COMPLETION_RATIOS_MODE" != "none" ] && OUTPUT_DIR="${OUTPUT_DIR}_completion_${COMPLETION_RATIOS_MODE}"
 
 DEBUG_RUN="${DEBUG_RUN:-0}"
 MAX_STEPS="${MAX_STEPS:--1}"
@@ -89,14 +93,14 @@ CHECKPOINT=$(
 )
 if [ -n "$CHECKPOINT" ]; then
     echo "Resuming from checkpoint: $CHECKPOINT"
-    # Workaround for CVE-2025-32434: transformers blocks torch.load on torch < 2.6.
-    # Model weights are in safetensors and load fine; delete only the pickle-based files.
+    # CVE-2025-32434: paged_adamw_8bit optimizer state uses complex bitsandbytes
+    # objects that cannot be safely loaded via torch.load on torch < 2.6, so we
+    # drop it (optimizer restarts from scratch, which is acceptable).
+    # scheduler.pt and rng_state files are kept so the LR schedule and data
+    # ordering continue correctly from the resumed step.
     rm -f "${CHECKPOINT}/optimizer.pt"       && echo "  Removed optimizer.pt"
-    rm -f "${CHECKPOINT}/scheduler.pt"      && echo "  Removed scheduler.pt"
     rm -f "${CHECKPOINT}/scaler.pt"         && echo "  Removed scaler.pt"
     rm -f "${CHECKPOINT}/training_args.bin" && echo "  Removed training_args.bin"
-    find "${CHECKPOINT}" -maxdepth 1 -name 'rng_state*.pth' -delete \
-        && echo "  Removed rng_state files"
 else
     echo "No checkpoint found, starting fresh"
 fi
@@ -130,6 +134,9 @@ python -u finetune.py \
     --lora_dropout 0.05 \
     --lora_target_modules '["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]' \
     --load_in_4bit True \
+    --completion_ratios_mode "$COMPLETION_RATIOS_MODE" \
+    ${COMPLETION_RATIOS_MODE:+--completion_ratios_path "$COMPLETION_RATIOS_PATH"} \
+    ${RESULTS_DIR:+--results_dir "$RESULTS_DIR"} \
     ${CHECKPOINT:+--resume_from_checkpoint "$CHECKPOINT"}
 
 echo "Training finished with exit code $?"

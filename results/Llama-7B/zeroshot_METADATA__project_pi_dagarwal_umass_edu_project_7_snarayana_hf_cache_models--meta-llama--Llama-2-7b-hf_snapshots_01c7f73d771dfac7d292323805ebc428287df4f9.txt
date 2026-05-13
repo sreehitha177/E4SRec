@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/models--meta-llama--Llama-2-7b-hf/snapshots/01c7f73d771dfac7d292323805ebc428287df4f9
+Dataset: datasets/sequential/LastFM/
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.005   0.005 0.005 0.005 0.005
+Top-5        0.006   0.030 0.012 0.012 0.016
+Top-10       0.006   0.056 0.015 0.015 0.024
+Top-20       0.005   0.103 0.018 0.018 0.036
+Top-100      0.005   0.505 0.026 0.026 0.105
+
+Detailed Arrays:
+Precision: [0.005 0.006 0.006 0.005 0.005]
+Recall: [0.005 0.03  0.056 0.103 0.505]
+MRR: [0.005 0.012 0.015 0.018 0.026]
+MAP: [0.005 0.012 0.015 0.018 0.026]
+NDCG: [0.005 0.016 0.024 0.036 0.105]

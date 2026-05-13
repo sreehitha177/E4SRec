@@ -1,0 +1,23 @@
+Zero-Shot Evaluation — GRU4Rec_only
+Base model: /datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Seq model:  GRU4Rec
+Dataset:    datasets/sequential/LastFM/
+Audio node path: 
+Lyric node path: 
+Metadata path:   
+Fusion strategy: concat
+Completion mode: none
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.003   0.003 0.003 0.003 0.003
+Top-5        0.005   0.024 0.011 0.011 0.014
+Top-10       0.004   0.039 0.013 0.013 0.019
+Top-20       0.005   0.091 0.016 0.016 0.032
+Top-100      0.005   0.470 0.024 0.024 0.099
+
+Detailed arrays:
+Precision: [0.003 0.005 0.004 0.005 0.005]
+Recall: [0.003 0.024 0.039 0.091 0.47 ]
+MRR: [0.003 0.011 0.013 0.016 0.024]
+MAP: [0.003 0.011 0.013 0.016 0.024]
+NDCG: [0.003 0.014 0.019 0.032 0.099]

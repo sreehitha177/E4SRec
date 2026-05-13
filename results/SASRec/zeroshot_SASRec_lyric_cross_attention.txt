@@ -1,0 +1,22 @@
+Zero-Shot Evaluation — SASRec_lyric_cross_attention
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Dataset: datasets/sequential/LastFM/
+Audio node path: 
+Lyric node path: /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7
+Fusion strategy: cross_attention
+Fusion weights:  equal
+Fusion target dim: 64
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.006   0.006 0.006 0.006 0.006
+Top-5        0.006   0.028 0.013 0.013 0.016
+Top-10       0.005   0.049 0.015 0.015 0.023
+Top-20       0.004   0.088 0.018 0.018 0.033
+Top-100      0.005   0.470 0.026 0.026 0.100
+
+Detailed arrays:
+Precision: [0.006 0.006 0.005 0.004 0.005]
+Recall: [0.006 0.028 0.049 0.088 0.47 ]
+MRR: [0.006 0.013 0.015 0.018 0.026]
+MAP: [0.006 0.013 0.015 0.018 0.026]
+NDCG: [0.006 0.016 0.023 0.033 0.1  ]

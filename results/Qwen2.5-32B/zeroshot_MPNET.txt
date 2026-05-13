@@ -1,0 +1,17 @@
+Zero-Shot Evaluation — SASRec + MPNET
+Base model: /datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B/snapshots/1818d35814b8319459f4bd55ed1ac8709630f003
+Node path:  /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.011   0.011 0.011 0.011 0.011
+Top-5        0.006   0.030 0.017 0.017 0.020
+Top-10       0.005   0.050 0.020 0.020 0.027
+Top-20       0.005   0.096 0.023 0.023 0.038
+Top-100      0.005   0.524 0.031 0.031 0.112
+
+Detailed arrays:
+Precision: [0.011 0.006 0.005 0.005 0.005]
+Recall: [0.011 0.03  0.05  0.096 0.524]
+MRR: [0.011 0.017 0.02  0.023 0.031]
+MAP: [0.011 0.017 0.02  0.023 0.031]
+NDCG: [0.011 0.02  0.027 0.038 0.112]

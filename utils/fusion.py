@@ -136,6 +136,27 @@ class FusionModule(nn.Module):
 # Shared helper used by both zero-shot scripts and finetune.py
 # ---------------------------------------------------------------------------
 
+def _read_embeddings_index(node_path: str) -> pd.DataFrame:
+    """Read the embeddings index from a node directory.
+
+    Supports two layouts:
+    - Single  embeddings.csv          (batch_1 style)
+    - Multiple embeddings_sub_N.csv   (batch_2 style)
+    """
+    single = os.path.join(node_path, "embeddings.csv")
+    if os.path.isfile(single):
+        return pd.read_csv(single)
+
+    import glob
+    sub_files = sorted(glob.glob(os.path.join(node_path, "embeddings_sub_*.csv")))
+    if sub_files:
+        return pd.concat([pd.read_csv(f) for f in sub_files], ignore_index=True)
+
+    raise FileNotFoundError(
+        f"No embeddings.csv or embeddings_sub_*.csv found in {node_path}"
+    )
+
+
 def load_node_embeddings(
     node_path: str,
     mapping_path: str,
@@ -145,20 +166,53 @@ def load_node_embeddings(
 ) -> Optional[torch.Tensor]:
     """Load per-item embeddings from a node directory into a remapped tensor.
 
-    Reads  <node_path>/embeddings.csv  which lists (artist_name, track_name,
-    embedding_path) rows, joins on the master map to get raw item_id, then
-    remaps through item_map to produce a [n_items, emb_dim] tensor whose row i
-    holds the embedding for the item whose remapped index is i.
+    Reads embeddings.csv (or embeddings_sub_*.csv for batch_2-style nodes),
+    joins on the master map to get raw item_id, then remaps through item_map
+    to produce a [n_items, emb_dim] tensor.
 
-    Returns None if node_path is missing or no embeddings matched.
+    node_path may be a comma-separated list of directories; all are merged
+    so that batch_1 + batch_2 coverage can be combined in one call.
+
+    Returns None if node_path is missing/empty or no embeddings matched.
     """
-    if not node_path or not os.path.isdir(node_path):
-        print(f"Skipping {model_name}: node_path not provided or invalid.")
+    if not node_path:
+        print(f"Skipping {model_name}: node_path not provided.")
         return None
 
-    print(f"\nLoading {model_name} embeddings from {node_path}...")
-    emb_csv = pd.read_csv(os.path.join(node_path, "embeddings.csv"))
-    master  = pd.read_csv(mapping_path)
+    # Support comma-separated list of node paths (e.g. batch_1/node_3,batch_2/node_3)
+    node_paths = [p.strip() for p in node_path.split(",") if p.strip()]
+    valid_paths = [p for p in node_paths if os.path.isdir(p)]
+    if not valid_paths:
+        print(f"Skipping {model_name}: none of the node paths exist: {node_paths}")
+        return None
+
+    master = pd.read_csv(mapping_path)
+    master["_key"] = (master["artist_name"].str.lower().str.strip() + "||" +
+                      master["track_name"].str.lower().str.strip())
+
+    all_merged = []
+    for np_ in valid_paths:
+        print(f"\nLoading {model_name} embeddings from {np_}...")
+        try:
+            emb_csv = _read_embeddings_index(np_)
+        except FileNotFoundError as e:
+            print(f"   WARNING: {e} — skipping.")
+            continue
+        emb_csv["_key"] = (emb_csv["artist_name"].str.lower().str.strip() + "||" +
+                           emb_csv["track_name"].str.lower().str.strip())
+        emb_csv["_node_path"] = np_
+        merged = (emb_csv.merge(master[["item_id", "_key"]], on="_key", how="inner")
+                         .drop_duplicates(subset=["track_index"]))
+        print(f"   {model_name} files: {len(emb_csv)} | "
+              f"master items: {len(master)} | matched: {len(merged)}")
+        all_merged.append(merged)
+
+    if not all_merged:
+        print(f"   WARNING: no matched {model_name} embeddings. Returning None.")
+        return None
+
+    merged = (pd.concat(all_merged, ignore_index=True)
+                .drop_duplicates(subset=["track_index"]))
 
     emb_csv["_key"] = (emb_csv["artist_name"].str.lower().str.strip() + "||" +
                        emb_csv["track_name"].str.lower().str.strip())
@@ -174,8 +228,10 @@ def load_node_embeddings(
         print(f"   WARNING: no matched {model_name} embeddings. Returning None.")
         return None
 
-    sample_file = os.path.basename(merged["embedding_path"].iloc[0])
-    sample = torch.load(os.path.join(node_path, sample_file),
+    print(f"   {model_name} total matched across all nodes: {len(merged)}")
+    first = merged.iloc[0]
+    sample_file = os.path.basename(first["embedding_path"])
+    sample = torch.load(os.path.join(first["_node_path"], sample_file),
                         map_location="cpu", weights_only=False)
     emb_dim = sample.shape[0]
     print(f"   {model_name} embedding dim: {emb_dim}")
@@ -183,7 +239,7 @@ def load_node_embeddings(
     aligned = torch.zeros(n_items, emb_dim, dtype=torch.float32)
 
     def _load_one(row):
-        pt = os.path.join(node_path, os.path.basename(row["embedding_path"]))
+        pt = os.path.join(row["_node_path"], os.path.basename(row["embedding_path"]))
         new_idx = item_map.get(int(row["item_id"]), 0)
         if os.path.exists(pt) and new_idx > 0:
             return new_idx, torch.load(pt, map_location="cpu", weights_only=False).float()

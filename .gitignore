@@ -152,5 +152,3 @@ data_preproc/user_sessions_lastfm1k_minuser1000_minitem7_sessgap1200_minsesslen1
 data_preproc/user_sessions_with_completion.csv
 data_preproc/song_completion_summary.csv
 
-# Results files
-results/

@@ -1,0 +1,17 @@
+Zero-Shot Evaluation Results (Global Temporal Split)
+Base model: /datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-32B-Instruct/snapshots/5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd
+Dataset: datasets/sequential/LastFM/
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.011   0.011 0.011 0.011 0.011
+Top-5        0.006   0.030 0.017 0.017 0.020
+Top-10       0.005   0.049 0.020 0.020 0.026
+Top-20       0.005   0.092 0.023 0.023 0.037
+Top-100      0.005   0.487 0.031 0.031 0.106
+
+Detailed Arrays:
+Precision: [0.011 0.006 0.005 0.005 0.005]
+Recall: [0.011 0.03  0.049 0.092 0.487]
+MRR: [0.011 0.017 0.02  0.023 0.031]
+MAP: [0.011 0.017 0.02  0.023 0.031]
+NDCG: [0.011 0.02  0.026 0.037 0.106]

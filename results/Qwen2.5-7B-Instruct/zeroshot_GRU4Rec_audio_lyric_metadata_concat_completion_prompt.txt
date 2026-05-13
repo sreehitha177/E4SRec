@@ -1,0 +1,23 @@
+Zero-Shot Evaluation — GRU4Rec_audio_lyric_metadata_concat_completion_prompt
+Base model: /datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Seq model:  GRU4Rec
+Dataset:    datasets/sequential/LastFM/
+Audio node path: /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3,/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_2/audio_embeddings/node_3
+Lyric node path: /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7,/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_2/lyrics_embeddings/node_8
+Metadata path:   /project/pi_dagarwal_umass_edu/project_7/hmagapu/metadata/mgphot/output/run-4-top50k/annotations_no_meta_few_shot.csv
+Fusion strategy: concat
+Completion mode: prompt
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.006   0.006 0.006 0.006 0.006
+Top-5        0.004   0.022 0.011 0.011 0.014
+Top-10       0.005   0.047 0.014 0.014 0.021
+Top-20       0.005   0.103 0.018 0.018 0.035
+Top-100      0.005   0.473 0.025 0.025 0.100
+
+Detailed arrays:
+Precision: [0.006 0.004 0.005 0.005 0.005]
+Recall: [0.006 0.022 0.047 0.103 0.473]
+MRR: [0.006 0.011 0.014 0.018 0.025]
+MAP: [0.006 0.011 0.014 0.018 0.025]
+NDCG: [0.006 0.014 0.021 0.035 0.1  ]

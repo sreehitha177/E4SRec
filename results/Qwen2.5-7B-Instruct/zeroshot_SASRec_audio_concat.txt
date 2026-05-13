@@ -1,0 +1,23 @@
+Zero-Shot Evaluation — SASRec_audio_concat
+Base model: /project/pi_dagarwal_umass_edu/project_7/snarayana/hf_cache/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28
+Dataset: datasets/sequential/LastFM/
+Audio node path: /scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3
+Lyric node path: 
+Fusion strategy: concat
+
+Fusion weights:   equal
+Fusion target dim:max modality dim
+
+         Precision  Recall   MRR   MAP  NDCG
+Top-1        0.003   0.003 0.003 0.003 0.003
+Top-5        0.005   0.024 0.009 0.009 0.013
+Top-10       0.004   0.042 0.012 0.012 0.019
+Top-20       0.004   0.089 0.015 0.015 0.031
+Top-100      0.005   0.511 0.023 0.023 0.103
+
+Detailed arrays:
+Precision: [0.003 0.005 0.004 0.004 0.005]
+Recall: [0.003 0.024 0.042 0.089 0.511]
+MRR: [0.003 0.009 0.012 0.015 0.023]
+MAP: [0.003 0.009 0.012 0.015 0.023]
+NDCG: [0.003 0.013 0.019 0.031 0.103]

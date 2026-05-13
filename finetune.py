@@ -28,7 +28,9 @@ def train(
     task_type: str = "sequential",
     # multi-modal fusion
     fusion_strategy: str = "concat",
-    fusion_target_dim: int = 0,  # 0 = use SASRec dim; ignored for concat
+    fusion_target_dim: int = 0,  # 0 = use seq model dim; ignored for concat
+    seq_model: str = "SASRec",   # SASRec | BERT4Rec | GRU4Rec
+    seq_embed_path: str = "",    # explicit path; defaults to <data_path>/<seq_model>_item_embed.pkl
     audio_node_path: str = "",
     lyric_node_path: str = "",
     mapping_path: str = "datasets/sequential/LastFM/item_id_master_map.csv",
@@ -62,9 +64,9 @@ def train(
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
-    prompt_template_name: str = "alpaca"
-    ,
+    prompt_template_name: str = "alpaca",
     load_in_4bit: bool = True,
+    results_dir: str = "/home/snarayana_umass_edu/finetune_results",
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -139,11 +141,11 @@ def train(
         data_collator = BipartiteGraphCollator()
         input_dim = 64
     elif task_type == 'sequential':
-        sasrec_embed_path = os.path.join(data_path, "SASRec_item_embed.pkl")
-        if not os.path.exists(sasrec_embed_path):
+        pkl_path = seq_embed_path if seq_embed_path else os.path.join(data_path, f"{seq_model}_item_embed.pkl")
+        if not os.path.exists(pkl_path):
             raise FileNotFoundError(
-                f"Missing sequential item embeddings: {sasrec_embed_path}. "
-                "Generate SASRec_item_embed.pkl before finetuning."
+                f"Missing sequential item embeddings: {pkl_path}. "
+                f"Generate {seq_model}_item_embed.pkl before finetuning."
             )
         # Load per-interaction completion ratio data if requested.
         comp_data = None
@@ -165,19 +167,20 @@ def train(
                 if module == 'torch.storage' and name == '_load_from_bytes':
                     return lambda b: torch.load(io.BytesIO(b), map_location='cpu', weights_only=False)
                 return super().find_class(module, name)
-        with open(sasrec_embed_path, 'rb') as _f:
+        with open(pkl_path, 'rb') as _f:
             raw_embed = _CpuUnpickler(_f).load()  # shape: [max_raw_id, embed_dim]
 
         input_dim = raw_embed.shape[1]
         n_items = len(dataset.item_map) + 1  # +1 for padding row at index 0
-        sasrec_embed = torch.zeros(n_items, input_dim)
+        seq_embed = torch.zeros(n_items, input_dim)
         for raw_id, new_idx in dataset.item_map.items():
             if raw_id < raw_embed.shape[0]:
-                sasrec_embed[new_idx] = raw_embed[raw_id]
+                seq_embed[new_idx] = raw_embed[raw_id]
         del raw_embed
+        print(f"Loaded {seq_model} embeddings: {seq_embed.shape}")
 
         # Load additional modalities if paths are provided.
-        embed_list = [sasrec_embed]
+        embed_list = [seq_embed]
         if audio_node_path or lyric_node_path:
             from utils.fusion import load_node_embeddings
             if audio_node_path:
@@ -245,6 +248,25 @@ def train(
             checkpoint_folder = f"checkpoint-{self.state.global_step}"
             output_dir = os.path.join(self.args.output_dir, checkpoint_folder)
             model.llama_model.save_pretrained(output_dir, save_embedding_layers=False)
+
+        def _load_optimizer_and_scheduler(self, checkpoint):
+            # CVE-2025-32434: transformers may call torch.load with weights_only=True
+            # which fails for scheduler state dicts on torch < 2.6.  Patch torch.load
+            # to allow weights_only=False only for this call, then restore it.
+            _orig = torch.load
+            def _permissive_load(*args, **kwargs):
+                kwargs["weights_only"] = False
+                return _orig(*args, **kwargs)
+            torch.load = _permissive_load
+            try:
+                super()._load_optimizer_and_scheduler(checkpoint)
+            finally:
+                torch.load = _orig
+
+        def _load_rng_state(self, checkpoint):
+            # transformers check_torch_load_is_safe() blocks torch.load on torch < 2.6.
+            # Skip RNG state restoration; training resumes with a fresh RNG state.
+            pass
 
     # Build a val dataset from the held-out valData entries when requested.
     # SequentialDataset.valData maps user -> [history, target_item]; we create
@@ -415,6 +437,20 @@ def train(
               f'MRR@{k}: {results["MRR"][j]} \n '
               f'MAP@{k}: {results["MAP"][j]} \n '
               f'NDCG@{k}: {results["NDCG"][j]} \n')
+
+    # Save metrics as JSON to both the checkpoint dir and the stable results dir.
+    import json
+    metrics_out = {f"{metric}@{k}": float(results[metric][j])
+                   for j, k in enumerate(topk)
+                   for metric in ["Precision", "Recall", "MRR", "MAP", "NDCG"]}
+    results_save_dir = results_dir
+    exp_name = os.path.basename(output_dir.rstrip("/"))
+    exp_results_dir = os.path.join(results_save_dir, exp_name)
+    os.makedirs(exp_results_dir, exist_ok=True)
+    metrics_path = os.path.join(exp_results_dir, "metrics.json")
+    with open(metrics_path, "w") as _mf:
+        json.dump(metrics_out, _mf, indent=2)
+    print(f"Saved metrics to {metrics_path}")
 
     os.makedirs(output_dir, exist_ok=True)
     # Save only the LoRA adapter weights, not the quantized base model weights.
