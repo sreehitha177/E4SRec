@@ -1,8 +1,10 @@
 import io
+import math
 import os
 from typing import List
 
 import fire
+import pandas as pd
 import pickle
 import numpy as np
 import torch
@@ -360,6 +362,15 @@ def train(
                'MAP': np.zeros(len(topk)),
                'NDCG': np.zeros(len(topk))}
 
+    # Build song name lookup for prompt-mode completion ratio injection.
+    name_lookup = {}
+    if mapping_path and os.path.exists(mapping_path):
+        master = pd.read_csv(mapping_path)
+        for _, row in master.iterrows():
+            new_idx = dataset.item_map.get(int(row["item_id"]), None)
+            if new_idx is not None:
+                name_lookup[new_idx] = f"'{row.get('track_name', '?')}' by {row.get('artist_name', '?')}"
+
     testData = dataset.testData
     users = np.arange(dataset.n_user)
     with torch.inference_mode():
@@ -390,20 +401,28 @@ def train(
 
                 eval_hist_meta = None
                 eval_comp_ratios = None
-                if comp_data is not None and completion_ratios_mode != "none":
-                    user_ratios = comp_data.get(u, [])
-                    ratios_slice = user_ratios[-len(seq):] if user_ratios else []
+                if comp_data is not None:
+                    user_ratios = comp_data.get(u + 1, [])
+                    prompt_window = seq[-10:]
+                    ratios_slice  = user_ratios[-len(seq):] if user_ratios else []
+                    prompt_ratios = ratios_slice[-len(prompt_window):] if ratios_slice else []
+
                     if completion_ratios_mode == "prompt":
+                        history_lines = [
+                            f"{i+1}. {name_lookup.get(iid, f'Item {iid}')}"
+                            for i, iid in enumerate(prompt_window)
+                        ]
                         ratio_strs = [
-                            "?" if (v is None or (v != v)) else f"{v:.2f}"
-                            for v in ratios_slice
+                            "?" if (v is None or math.isnan(v)) else f"{v:.2f}"
+                            for v in prompt_ratios
                         ]
-                        eval_hist_meta = [
-                            f"{base_instruction}\n"
-                            f"Completion ratios for listened songs in order: [{', '.join(ratio_strs)}]"
-                        ]
+                        paired = "\n".join(
+                            f"{line}  [completion: {r}]"
+                            for line, r in zip(history_lines, ratio_strs)
+                        )
+                        eval_hist_meta = [prompter.generate_prompt(task_type, paired)[0]]
                     elif completion_ratios_mode == "embed":
-                        vals = [0.0 if (v is None or (v != v)) else float(v) for v in ratios_slice]
+                        vals = [0.0 if (v is None or math.isnan(v)) else float(v) for v in ratios_slice]
                         eval_comp_ratios = torch.FloatTensor([vals]).to(device)
 
                 _, ratings = model.predict(
