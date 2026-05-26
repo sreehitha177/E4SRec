@@ -14,7 +14,7 @@ DRY_RUN=0
 
 BASE_MODEL="/datasets/ai/llama2/hub/models--meta-llama--Llama-2-13b-hf/snapshots/5c31dfb671ce7cfe2d7bb7c04375e44c55e815b1"
 HF_CACHE="/datasets/ai/llama2/hub"
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/Llama-2-13B"
+CHECKPOINT_BASE="/scratch3/workspace/snarayana_umass_edu-checkpoints/Llama-2-13B"
 AUDIO_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3"
 LYRIC_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7"
 COMPLETION_RATIOS_PATH="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
@@ -81,7 +81,7 @@ echo "=========================================="
 echo " Submitting 39 finetuning experiments (Llama-2-13B)"
 echo "=========================================="
 
-for mode in none prompt embed; do
+for mode in none prompt; do
     run_all_combos "$mode"
 done
 

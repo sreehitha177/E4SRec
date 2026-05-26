@@ -1,12 +1,12 @@
 #!/bin/bash
 # submit_finetune_bert4rec_llama13b.sh
 #
-# Submits all 39 BERT4Rec finetuning experiments for Llama-2-13b-hf:
-#   13 fusion combos × 3 completion modes (none, prompt, embed)
+# Submits all 26 BERT4Rec finetuning experiments for Llama-2-13b-hf:
+#   13 fusion combos × 2 completion modes (none, prompt)
 # All jobs request vram48 (13B needs more VRAM than L4).
 #
 # Usage:
-#   bash submit_finetune_bert4rec_llama13b.sh           # submit all 39
+#   bash submit_finetune_bert4rec_llama13b.sh           # submit all 26
 #   bash submit_finetune_bert4rec_llama13b.sh --dry-run
 
 DRY_RUN=0
@@ -14,7 +14,8 @@ DRY_RUN=0
 
 BASE_MODEL="/datasets/ai/llama2/hub/models--meta-llama--Llama-2-13b-hf/snapshots/5c31dfb671ce7cfe2d7bb7c04375e44c55e815b1"
 HF_CACHE="/datasets/ai/llama2/hub"
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/BERT4Rec_Llama-2-13B"
+CHECKPOINT_BASE="/scratch3/workspace/snarayana_umass_edu-checkpoints/BERT4Rec_Llama-2-13B"
+BERT4REC_EMBED="/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec/datasets/sequential/LastFM/BERT4Rec_item_embed.pkl"
 AUDIO_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3"
 LYRIC_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7"
 COMPLETION_RATIOS_PATH="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
@@ -48,7 +49,8 @@ submit() {
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=vram48
 #SBATCH --mem=64G
-#SBATCH --time=48:00:00
+#SBATCH --time=120:00:00
+#SBATCH --qos=long
 #SBATCH --output=logs/ftB4R13b_${tag}_%j.log
 #SBATCH --error=logs/ftB4R13b_${tag}_%j.err
 
@@ -75,6 +77,7 @@ python -u finetune.py \\
     --base_model        "${BASE_MODEL}" \\
     --task_type         "sequential" \\
     --seq_model         "BERT4Rec" \\
+    --seq_embed_path    "${BERT4REC_EMBED}" \\
     --data_path         "datasets/sequential/LastFM/" \\
     --output_dir        "${output_dir}" \\
     --mapping_path      "datasets/sequential/LastFM/item_id_master_map.csv" \\
@@ -124,11 +127,11 @@ run_all_combos() {
 }
 
 echo "=========================================="
-echo " Submitting 39 BERT4Rec finetune experiments (Llama-2-13B)"
+echo " Submitting 26 BERT4Rec finetune experiments (Llama-2-13B)"
 echo "=========================================="
 mkdir -p logs
 
-for mode in none prompt embed; do
+for mode in none prompt; do
     run_all_combos "$mode"
 done
 

@@ -5,9 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=96G
+#SBATCH --mem=64G
 #SBATCH --gres=gpu:2
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH --constraint=vram48
 
@@ -45,7 +45,7 @@ COMPLETION_PKL="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
 BERTGRU_EMBED_DIR="/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec/datasets/sequential/LastFM"
 
 RUN=0
-TOTAL=18
+TOTAL=27
 
 run() {
     RUN=$((RUN + 1))
@@ -65,6 +65,7 @@ run_block() {
     local base_model="$2"
     local cache_dir="$3"
     local output_dir="$4"
+    local load_in_4bit="${5:-False}"
 
     run "${llm_label} | SASRec only" \
         $PYTHON zeroshot_seq_models.py \
@@ -72,6 +73,18 @@ run_block() {
             --seq_model=SASRec \
             --audio_node_path="" --lyric_node_path="" --metadata_path="" \
             --completion_ratios_mode=none \
+            --load_in_4bit="$load_in_4bit" \
+            --output_dir="$output_dir"
+
+    run "${llm_label} | SASRec + audio + lyric + metadata" \
+        $PYTHON zeroshot_seq_models.py \
+            --base_model="$base_model" --cache_dir="$cache_dir" \
+            --seq_model=SASRec \
+            --audio_node_path="$AUDIO_NODE" --lyric_node_path="$LYRIC_NODE" \
+            --metadata_path="$METADATA" \
+            --completion_ratios_mode=none \
+            --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 
     run "${llm_label} | SASRec + audio + lyric + metadata + completion" \
@@ -82,6 +95,7 @@ run_block() {
             --metadata_path="$METADATA" \
             --completion_ratios_path="$COMPLETION_PKL" --completion_ratios_mode=prompt \
             --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 
     run "${llm_label} | BERT4Rec only" \
@@ -91,6 +105,19 @@ run_block() {
             --seq_embed_path="${BERTGRU_EMBED_DIR}/BERT4Rec_item_embed.pkl" \
             --audio_node_path="" --lyric_node_path="" --metadata_path="" \
             --completion_ratios_mode=none \
+            --load_in_4bit="$load_in_4bit" \
+            --output_dir="$output_dir"
+
+    run "${llm_label} | BERT4Rec + audio + lyric + metadata" \
+        $PYTHON zeroshot_seq_models.py \
+            --base_model="$base_model" --cache_dir="$cache_dir" \
+            --seq_model=BERT4Rec \
+            --seq_embed_path="${BERTGRU_EMBED_DIR}/BERT4Rec_item_embed.pkl" \
+            --audio_node_path="$AUDIO_NODE" --lyric_node_path="$LYRIC_NODE" \
+            --metadata_path="$METADATA" \
+            --completion_ratios_mode=none \
+            --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 
     run "${llm_label} | BERT4Rec + audio + lyric + metadata + completion" \
@@ -102,6 +129,7 @@ run_block() {
             --metadata_path="$METADATA" \
             --completion_ratios_path="$COMPLETION_PKL" --completion_ratios_mode=prompt \
             --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 
     run "${llm_label} | GRU4Rec only" \
@@ -111,6 +139,19 @@ run_block() {
             --seq_embed_path="${BERTGRU_EMBED_DIR}/GRU4Rec_item_embed.pkl" \
             --audio_node_path="" --lyric_node_path="" --metadata_path="" \
             --completion_ratios_mode=none \
+            --load_in_4bit="$load_in_4bit" \
+            --output_dir="$output_dir"
+
+    run "${llm_label} | GRU4Rec + audio + lyric + metadata" \
+        $PYTHON zeroshot_seq_models.py \
+            --base_model="$base_model" --cache_dir="$cache_dir" \
+            --seq_model=GRU4Rec \
+            --seq_embed_path="${BERTGRU_EMBED_DIR}/GRU4Rec_item_embed.pkl" \
+            --audio_node_path="$AUDIO_NODE" --lyric_node_path="$LYRIC_NODE" \
+            --metadata_path="$METADATA" \
+            --completion_ratios_mode=none \
+            --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 
     run "${llm_label} | GRU4Rec + audio + lyric + metadata + completion" \
@@ -122,21 +163,23 @@ run_block() {
             --metadata_path="$METADATA" \
             --completion_ratios_path="$COMPLETION_PKL" --completion_ratios_mode=prompt \
             --fusion_strategy=concat \
+            --load_in_4bit="$load_in_4bit" \
             --output_dir="$output_dir"
 }
 
 echo "=============================================="
 echo " Zero-Shot All-LLM Sweep"
-echo " LLMs : Qwen2.5-7B-Instruct, Llama-2-13B, Llama-3-70B"
-echo " Seq  : SASRec, BERT4Rec, GRU4Rec"
-echo " Total: ${TOTAL} runs"
+echo " LLMs    : Qwen2.5-7B-Instruct, Llama-2-13B, Llama-3-70B"
+echo " Seq     : SASRec, BERT4Rec, GRU4Rec"
+echo " Configs : only | +audio+lyric+meta | +audio+lyric+meta+completion"
+echo " Total   : ${TOTAL} runs"
 echo " Job  : $SLURM_JOB_ID  |  Node: $SLURMD_NODENAME"
 echo " Start: $(date)"
 echo "=============================================="
 
-run_block "Qwen2.5-7B-Instruct" "$QWEN7B"   "$QWEN7B_CACHE"   "results/Qwen2.5-7B-Instruct"
-run_block "Llama-2-13B"         "$LLAMA13B" "$LLAMA13B_CACHE" "results/Llama-2-13B"
-run_block "Llama-3-70B"         "$LLAMA70B" "$LLAMA70B_CACHE" "results/Llama-3-70B"
+run_block "Qwen2.5-7B-Instruct" "$QWEN7B"   "$QWEN7B_CACHE"   "results/Qwen2.5-7B-Instruct" False
+run_block "Llama-2-13B"         "$LLAMA13B" "$LLAMA13B_CACHE" "results/Llama-2-13B"         False
+run_block "Llama-3-70B"         "$LLAMA70B" "$LLAMA70B_CACHE" "results/Llama-3-70B"         True
 
 echo ""
 echo "=============================================="

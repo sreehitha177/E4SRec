@@ -107,6 +107,7 @@ def zero_shot_evaluate(
     max_test_users: int = 0,
     prompt_template_name: str = "alpaca",
     device_map: str = "auto",
+    load_in_4bit: bool = False,
     # Completion ratios: "none" | "prompt" | "embed"
     completion_ratios_path: str = "",
     completion_ratios_mode: str = "none",
@@ -205,6 +206,7 @@ def zero_shot_evaluate(
         lora_dropout=lora_dropout,
         lora_target_modules=lora_target_modules,
         device_map=device_map,
+        load_in_4bit=load_in_4bit,
         instruction_text=prompter.generate_prompt(task_type),
         user_embeds=None,
         input_embeds=item_embed,

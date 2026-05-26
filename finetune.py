@@ -69,6 +69,7 @@ def train(
     prompt_template_name: str = "alpaca",
     load_in_4bit: bool = True,
     results_dir: str = "/home/snarayana_umass_edu/finetune_results",
+    eval_only: bool = False,  # skip training; load saved adapter from output_dir and evaluate
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -345,12 +346,29 @@ def train(
         data_collator=data_collator,
     )
 
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    if eval_only:
+        # Load the final saved adapter from output_dir instead of training.
+        adapter_pth = os.path.join(output_dir, "adapter.pth")
+        lora_dir = output_dir  # contains adapter_model.safetensors + adapter_config.json
+        if not os.path.exists(adapter_pth):
+            raise FileNotFoundError(f"No adapter.pth found in output_dir: {output_dir}")
+        print(f"eval_only: loading LoRA weights from {lora_dir}")
+        model.llama_model.load_adapter(lora_dir, adapter_name="default")
+        model.llama_model.set_adapter("default")
+        print(f"eval_only: loading projection heads from {adapter_pth}")
+        ckpt = torch.load(adapter_pth, map_location="cpu", weights_only=False)
+        model.input_proj.load_state_dict(ckpt["input_proj"])
+        model.score.load_state_dict(ckpt["score"])
+        if model.fusion is not None and "fusion" in ckpt:
+            model.fusion.load_state_dict(ckpt["fusion"])
+        del trainer
+    else:
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        # Free optimizer states and gradient buffers before running eval inference.
+        del trainer
+        torch.cuda.empty_cache()
 
-    # Free optimizer states and gradient buffers before running eval inference.
-    del trainer
     torch.cuda.empty_cache()
-
     # load_best_model_at_end internally calls model.to(device), which moves
     # self.score from CPU to CUDA.  Re-assert CPU placement before eval.
     model.score = model.score.cpu().float()

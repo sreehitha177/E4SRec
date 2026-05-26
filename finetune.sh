@@ -6,7 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:l4:1
 #SBATCH --mem=48G
-#SBATCH --time=48:00:00
+#SBATCH --time=120:00:00
+#SBATCH --qos=long
 #SBATCH --exclude=gpu056
 #SBATCH --output=logs/finetune_%j.log
 #SBATCH --error=logs/finetune_%j.err
@@ -40,7 +41,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 BASE_MODEL="${BASE_MODEL:-/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28}"
 DATA_PATH="datasets/sequential/LastFM/"
 MAPPING_PATH="datasets/sequential/LastFM/item_id_master_map.csv"
-CHECKPOINT_BASE="${CHECKPOINT_BASE:-/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/Qwen2.5-7B}"
+CHECKPOINT_BASE="${CHECKPOINT_BASE:-/scratch3/workspace/snarayana_umass_edu-checkpoints/Qwen2.5-7B}"
 RESULTS_DIR="${RESULTS_DIR:-}"
 
 # ── Fusion config ─────────────────────────────────────────────────────────────

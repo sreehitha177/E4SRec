@@ -1,8 +1,8 @@
 #!/bin/bash
 # submit_finetune_bert4rec_qwen7b.sh
 #
-# Submits all 39 BERT4Rec finetuning experiments for Qwen2.5-7B-Instruct:
-#   13 fusion combos × 3 completion modes (none, prompt, embed)
+# Submits all 26 BERT4Rec finetuning experiments for Qwen2.5-7B-Instruct:
+#   13 fusion combos × 2 completion modes (none, prompt)
 # Baseline/audio runs use L4 (24GB); lyric runs request vram48.
 #
 # Usage:
@@ -14,7 +14,8 @@ DRY_RUN=0
 
 BASE_MODEL="/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28"
 HF_CACHE="/datasets/ai/qwen2/hub"
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/BERT4Rec_Qwen2.5-7B"
+CHECKPOINT_BASE="/scratch3/workspace/snarayana_umass_edu-checkpoints/BERT4Rec_Qwen2.5-7B"
+BERT4REC_EMBED="/work/pi_dagarwal_umass_edu/project_7/srikar/E4SRec/datasets/sequential/LastFM/BERT4Rec_item_embed.pkl"
 AUDIO_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3"
 LYRIC_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7"
 COMPLETION_RATIOS_PATH="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
@@ -52,7 +53,8 @@ submit() {
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=${gres}
 #SBATCH --mem=${mem}
-#SBATCH --time=48:00:00
+#SBATCH --time=120:00:00
+#SBATCH --qos=long
 #SBATCH --output=logs/ftB4R7b_${tag}_%j.log
 #SBATCH --error=logs/ftB4R7b_${tag}_%j.err
 
@@ -79,6 +81,7 @@ python -u finetune.py \\
     --base_model        "${BASE_MODEL}" \\
     --task_type         "sequential" \\
     --seq_model         "BERT4Rec" \\
+    --seq_embed_path    "${BERT4REC_EMBED}" \\
     --data_path         "datasets/sequential/LastFM/" \\
     --output_dir        "${output_dir}" \\
     --mapping_path      "datasets/sequential/LastFM/item_id_master_map.csv" \\
@@ -132,7 +135,7 @@ echo " Submitting 39 BERT4Rec finetune experiments (Qwen2.5-7B)"
 echo "=========================================="
 mkdir -p logs
 
-for mode in none prompt embed; do
+for mode in none prompt; do
     run_all_combos "$mode"
 done
 

@@ -209,7 +209,7 @@ class LLM4Rec(nn.Module):
     def _encode(self, inputs, inputs_mask, history_metadata=None, completion_ratios=None):
         """Run the LLM and return pooled last-token hidden state (on GPU)."""
         bs = inputs.shape[0]
-        device = next(self.llama_model.parameters()).device
+        device = inputs.device
         embed_tokens = self.llama_model.get_input_embeddings()
         response_embeds = embed_tokens(self.response_ids.to(device)).expand(bs, -1, -1)
         response_mask = self.response_mask.to(device).expand(bs, -1)

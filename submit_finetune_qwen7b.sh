@@ -14,7 +14,7 @@ DRY_RUN=0
 
 BASE_MODEL="/datasets/ai/qwen2/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28"
 HF_CACHE="/datasets/ai/qwen2/hub"
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/Qwen2.5-7B"
+CHECKPOINT_BASE="/scratch3/workspace/snarayana_umass_edu-checkpoints/Qwen2.5-7B"
 AUDIO_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3"
 LYRIC_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7"
 COMPLETION_RATIOS_PATH="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
@@ -84,7 +84,7 @@ echo "=========================================="
 echo " Submitting 39 finetuning experiments (Qwen2.5-7B)"
 echo "=========================================="
 
-for mode in none prompt embed; do
+for mode in none prompt; do
     run_all_combos "$mode"
 done
 

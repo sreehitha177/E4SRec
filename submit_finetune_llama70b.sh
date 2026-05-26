@@ -14,7 +14,7 @@ DRY_RUN=0
 
 BASE_MODEL="/datasets/ai/llama3/hub/models--meta-llama--Meta-Llama-3-70B/snapshots/c82494877ce7f6d7d317c56ec081328e382c72fe"
 HF_CACHE="/datasets/ai/llama3/hub"
-CHECKPOINT_BASE="/project/pi_dagarwal_umass_edu/project_7/snarayana/checkpoints/Llama-3-70B"
+CHECKPOINT_BASE="/scratch3/workspace/snarayana_umass_edu-checkpoints/Llama-3-70B"
 AUDIO_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/audio_embeddings/node_3"
 LYRIC_NODE_PATH="/scratch3/workspace/skandagatla_umass_edu-dolby/embeddings/batch_1/lyrics_embeddings/node_7"
 COMPLETION_RATIOS_PATH="datasets/sequential/LastFM/interaction_completion_ratios.pkl"
